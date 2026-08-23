@@ -1,0 +1,477 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MC52 走行ログビュワー</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* ══ 配色 ══════════════════════════════════════════════════
+ * ギヤは順序尺度（1<2<…<6）なのでカテゴリカルではなく逐次ランプを使う。
+ * 単一色相(青)を light→dark で 6 段。dataviz の validator で
+ * --ordinal 検証済み（単調性・段間 ΔL・光端コントラスト・色相幅すべて PASS）。
+ *
+ * 地図の線は暗いケーシングの上に乗せる。OSM タイル(#f2efe9 前後)に直接置くと
+ * 光端が 1.56:1 でコントラスト floor を割るため、隣接面をケーシングにする。
+ * ケーシング #2b2a27 に対しては 8.03:1 で通る。
+ * ══════════════════════════════════════════════════════════ */
+:root{
+  --bg:#07090d; --panel:#11151c; --line:#232b38;
+  --fg:#e8eef7; --dim:#7d8899; --mute:#5b6472; --accent:#3987e5;
+  --warn:#ffb020; --bad:#ff4d5e;
+  --casing:#2b2a27;
+  --g1:#9ec5f4; --g2:#6da7ec; --g3:#3987e5;
+  --g4:#256abf; --g5:#184f95; --g6:#0d366b;
+  --gx:#8b8b86;          /* 不確定・ニュートラル。ランプ外の中立色 */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg); overflow:hidden;
+  font-family:-apple-system,"Helvetica Neue",Roboto,sans-serif;
+  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
+  display:flex; flex-direction:column;
+}
+
+/* ── 操作列（フィルタはチャート上の 1 行にまとめる） ── */
+#bar{flex:0 0 auto; display:flex; flex-wrap:wrap; gap:.5rem; align-items:center;
+     padding:.45rem .6rem; background:var(--panel); border-bottom:1px solid var(--line);
+     font-size:.75rem}
+#bar label{display:flex; align-items:center; gap:.3rem; color:var(--dim)}
+input[type=file]{font:inherit; font-size:.72rem; color:var(--dim); max-width:11rem}
+input[type=number]{font:inherit; width:4.4rem; background:#0c1016; color:var(--fg);
+  border:1px solid var(--line); border-radius:.25rem; padding:.2rem .3rem}
+button{font:inherit; font-size:.72rem; font-weight:600; color:var(--fg); background:#161c25;
+  border:1px solid var(--line); border-radius:.3rem; padding:.32rem .55rem; cursor:pointer}
+button:active{background:#202834}
+button:disabled{opacity:.35}
+#stat{margin-left:auto; color:var(--dim); font-size:.72rem; white-space:nowrap}
+
+/* ── 本体 ── */
+#wrap{flex:1 1 auto; display:flex; min-height:0}
+#map{flex:1 1 60%; min-height:0; background:#1a1a19}
+#side{flex:1 1 40%; min-width:0; overflow-y:auto; border-left:1px solid var(--line);
+      padding:.4rem; display:flex; flex-direction:column; gap:.4rem}
+@media (max-width:900px){
+  #wrap{flex-direction:column}
+  #map{flex:0 0 45vh}
+  #side{flex:1 1 auto; border-left:0; border-top:1px solid var(--line)}
+}
+
+/* ── チャート ── */
+.chart{background:var(--panel); border:1px solid var(--line); border-radius:.4rem;
+       padding:.3rem .4rem .1rem}
+.chart h3{font-size:.68rem; font-weight:600; color:var(--dim); letter-spacing:.08em;
+          display:flex; justify-content:space-between; align-items:baseline}
+.chart h3 span{color:var(--fg); font-size:.82rem; font-weight:700}
+.chart canvas{width:100%; height:74px; display:block; touch-action:none}
+
+/* ── 凡例（地図の上。ギヤは色だけに頼らないよう数字も入れる） ── */
+.leaflet-control.legend{
+  background:rgba(252,252,251,.94); color:#0b0b0b; padding:.4rem .5rem;
+  border-radius:.35rem; font-size:.68rem; line-height:1.5;
+  box-shadow:0 1px 5px rgba(0,0,0,.4)}
+.legend b{display:block; font-size:.64rem; color:#52514e; font-weight:600;
+          letter-spacing:.06em; margin-bottom:.25rem}
+.legend .row{display:flex; align-items:center; gap:.28rem; flex-wrap:wrap}
+.legend .sw{width:1.15rem; height:.42rem; border-radius:999px;
+            outline:1.5px solid var(--casing); outline-offset:0}
+.legend .wd{display:flex; align-items:center; gap:.3rem; margin-top:.3rem}
+.legend .wd i{display:block; background:#52514e; border-radius:999px}
+
+#empty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+       text-align:center; color:var(--dim); font-size:.85rem; padding:2rem; pointer-events:none}
+#empty.hide{display:none}
+</style>
+
+<div id="bar">
+  <input type="file" id="file" accept=".csv,text/csv">
+  <label>k <input type="number" id="k" step="0.001" value="0.950"></label>
+  <label>窓± <input type="number" id="tol" step="0.5" value="4"></label>%
+  <button id="fit" disabled>自動較正</button>
+  <button id="tbl" disabled>表</button>
+  <span id="stat">CSV を読み込む</span>
+</div>
+
+<div id="wrap">
+  <div id="map"><div id="empty">アプリが書き出した CSV を読み込むと、<br>経路と時系列を表示する</div></div>
+  <div id="side"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+const VERSION = 'v20260823a';
+
+/* ══════════════════════════════════════════════════════════
+ * MC52 走行ログビュワー
+ *
+ * index.html が書き出した CSV（OBD と GPS を時刻結合済み）を読み、
+ *   ・地図: 経路を描く。線の太さ = 車速、線の色 = ギヤ
+ *   ・チャート: 車速/ギヤ/回転数/スロットル/水温/電圧 を時系列で
+ * 表示する。PC ブラウザと Android Chrome の双方で動く。
+ *
+ * ギヤは CSV に入っていないので、ここで rpm/車速比から求める。
+ * 判定は tools/gearcal.py と同じ方式 —— 理論減速比を軸に、単一の
+ * スケール係数 k だけを当てはめる。k はタイヤ外径・摩耗・空気圧・
+ * 速度計の系統誤差をまとめて吸収する唯一の未知数。
+ *
+ * 依存は Leaflet のみで、それも地図だけ。**チャートは自前描画で
+ * 依存ゼロ**にしてある。OSM タイルは通信が要るが、通信が無くても
+ * ログの解析（チャート）は成立させたいため。
+ * ══════════════════════════════════════════════════════════ */
+
+// ── 車両諸元（Honda factbook 2018-03、2BK-MC52）────────────
+const GEAR = {1:3.416, 2:2.250, 3:1.650, 4:1.350, 5:1.166, 6:1.038};
+const PRIMARY = 2.807, SECONDARY = 2.571;
+const TIRE_CIRC = Math.PI * (17*25.4 + 2*150*0.60) / 1000;   // 後輪 150/60R17 [m]
+
+/** 理論 rpm/(km/h) 比。1速 213.8 … 6速 65.0 */
+const R = {};
+for (const n in GEAR) R[n] = PRIMARY * GEAR[n] * SECONDARY / (TIRE_CIRC * 60 / 1000);
+const GEARS = [1,2,3,4,5,6];
+
+const GCOL = {1:'--g1',2:'--g2',3:'--g3',4:'--g4',5:'--g5',6:'--g6'};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+const $ = id => document.getElementById(id);
+let rows = [], map = null, layer = null, marker = null, legend = null;
+let cursor = -1;
+
+// ── CSV 読み込み ─────────────────────────────────────────
+// アプリ形式（rpm,speed_obd,…,lat,lon）と Mac 側 logger.py 形式
+// （0C_rpm,0D_speed,…）の双方を受ける。後者に GPS は無いので地図は出ない。
+const COLS = {
+  t:['t_sec'], rpm:['rpm','0C_rpm'], spd:['speed_obd','0D_speed'],
+  thr:['throttle','11_tps'], ect:['ect','05_ect'], volt:['volt','42_volt'],
+  lat:['lat'], lon:['lon'], gspd:['speed_gps'],
+};
+
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) throw new Error('空のファイル');
+  const head = lines[0].split(',').map(s => s.trim());
+  const pick = {};
+  for (const key in COLS) {
+    for (const c of COLS[key]) { const i = head.indexOf(c); if (i >= 0) { pick[key] = i; break; } }
+  }
+  if (pick.rpm === undefined || pick.spd === undefined) {
+    throw new Error('rpm / 車速の列が見つからない: ' + head.join(','));
+  }
+  const num = (a, i) => (i === undefined || a[i] === undefined || a[i] === '') ? null : (isNaN(+a[i]) ? null : +a[i]);
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const a = lines[i].split(',');
+    const r = {
+      t: num(a, pick.t) ?? i, rpm: num(a, pick.rpm), spd: num(a, pick.spd),
+      thr: num(a, pick.thr), ect: num(a, pick.ect), volt: num(a, pick.volt),
+      lat: num(a, pick.lat), lon: num(a, pick.lon), gspd: num(a, pick.gspd),
+    };
+    r.ratio = (r.rpm > 500 && r.spd >= 8) ? r.rpm / r.spd : null;
+    out.push(r);
+  }
+  return out;
+}
+
+// ── ギヤ判定 ──────────────────────────────────────────────
+// 比 = k * R(n)。最も近いギヤへ割り当て、窓の外は不確定(null)。
+function assignGears(k, tolPct) {
+  const tol = tolPct / 100;
+  for (const r of rows) {
+    r.gear = null;
+    if (r.ratio == null) continue;
+    let best = null, bd = Infinity;
+    for (const n of GEARS) {
+      const d = Math.abs(r.ratio / (k * R[n]) - 1);
+      if (d < bd) { bd = d; best = n; }
+    }
+    if (bd <= tol) r.gear = best;
+  }
+}
+
+/**
+ * k の当てはめ。gearcal.py と同じ考え方で、対数空間で「等間隔でない櫛」を
+ * 平行移動させ、残差を頭打ちにした robust な評価で最小点を探す。
+ * 外れ値（半クラ・シフト中）を引きずらないための頭打ち。
+ */
+function fitK() {
+  const xs = rows.filter(r => r.ratio != null).map(r => Math.log(r.ratio));
+  if (xs.length < 30) return null;
+  const logR = GEARS.map(n => Math.log(R[n]));
+  const cut = Math.log(1.08);
+  const lo = Math.log(0.75), hi = Math.log(1.25), N = 2000;
+  let best = null, bestC = Infinity;
+  for (let i = 0; i < N; i++) {
+    const lk = lo + (hi - lo) * i / (N - 1);
+    let c = 0;
+    for (const x of xs) {
+      let d = Infinity;
+      for (const lr of logR) { const v = Math.abs(x - lk - lr); if (v < d) d = v; }
+      c += Math.min(d, cut) ** 2;
+    }
+    if (c < bestC) { bestC = c; best = lk; }
+  }
+  return Math.exp(best);
+}
+
+// ── 地図 ─────────────────────────────────────────────────
+const SPD_STEPS = [20, 40, 60, 80];        // 太さの区切り [km/h]
+const SPD_W = [2, 3, 4.5, 6, 7.5];         // 対応する線幅 [px]
+const spdClass = v => v == null ? 0 : SPD_STEPS.filter(s => v >= s).length;
+
+function drawMap() {
+  const pts = rows.filter(r => r.lat != null && r.lon != null);
+  // Leaflet は CDN 依存。読めなくてもチャート側は成立させたいので、
+  // ここで打ち切って以降の処理を巻き込まない。
+  if (typeof L === 'undefined') {
+    $('empty').textContent = '地図を読み込めない（通信不可）。チャートのみ表示する';
+    $('empty').classList.remove('hide');
+    return;
+  }
+  $('empty').classList.toggle('hide', pts.length > 0);
+  if (!pts.length) {
+    $('empty').textContent = 'このログに GPS 座標が無い。チャートのみ表示する';
+    if (layer) layer.clearLayers();
+    return;
+  }
+
+  if (!map) {
+    map = L.map('map', {preferCanvas:true, zoomControl:true});
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+    layer = L.layerGroup().addTo(map);
+    marker = L.circleMarker([0,0], {radius:6, color:'#fff', weight:2,
+      fillColor:css('--accent'), fillOpacity:1, interactive:false});
+    addLegend();
+  }
+  layer.clearLayers();
+
+  // 同じ (ギヤ, 速度クラス) が続く区間をまとめて 1 本の polyline にする。
+  // 1 点ごとに線を引くと数千本になって特に端末側で重い。
+  const runs = [];
+  let cur = null;
+  for (const p of pts) {
+    const key = (p.gear ?? 0) + ':' + spdClass(p.spd);
+    if (!cur || cur.key !== key) {
+      if (cur) { cur.pts.push([p.lat, p.lon]); }   // 境界点を共有して線を繋ぐ
+      cur = {key, gear:p.gear, w:SPD_W[spdClass(p.spd)], pts:[[p.lat, p.lon]]};
+      runs.push(cur);
+    } else {
+      cur.pts.push([p.lat, p.lon]);
+    }
+  }
+  const casing = css('--casing');
+  for (const run of runs) {
+    if (run.pts.length < 2) continue;
+    // ケーシングを先に敷く。下地(OSMタイル)とのコントラストはこれで担保する
+    L.polyline(run.pts, {color:casing, weight:run.w + 3, opacity:.9,
+      lineCap:'round', lineJoin:'round', interactive:false}).addTo(layer);
+    L.polyline(run.pts, {color: run.gear ? css(GCOL[run.gear]) : css('--gx'),
+      weight:run.w, opacity:1, lineCap:'round', lineJoin:'round', interactive:false}).addTo(layer);
+  }
+  marker.addTo(layer);
+  map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])), {padding:[24,24]});
+}
+
+function addLegend() {
+  legend = L.control({position:'bottomright'});
+  legend.onAdd = () => {
+    const d = L.DomUtil.create('div', 'leaflet-control legend');
+    let sw = '';
+    // 色だけに頼らないよう、各段に数字を添える
+    for (const n of GEARS) sw += `<span class="sw" style="background:${css(GCOL[n])}"></span><span>${n}</span>`;
+    let wd = '';
+    const lbl = ['〜20','〜40','〜60','〜80','80〜'];
+    for (let i = 0; i < SPD_W.length; i++)
+      wd += `<i style="width:1.1rem;height:${SPD_W[i]}px"></i><span>${lbl[i]}</span>`;
+    d.innerHTML = `<b>ギヤ（線の色）</b><div class="row">${sw}
+      <span class="sw" style="background:${css('--gx')}"></span><span>不明</span></div>
+      <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
+    L.DomEvent.disableClickPropagation(d);
+    return d;
+  };
+  legend.addTo(map);
+}
+
+// ── チャート ─────────────────────────────────────────────
+// 依存ゼロの自前描画。6 枚の小倍数（small multiples）で X 軸を共有する。
+// 各パネルは単一系列なので凡例は置かない（見出しが系列名を兼ねる）。
+const SERIES = [
+  {key:'spd',  name:'車速',   unit:'km/h', fix:0},
+  // 目盛りが 1/6 に丸まる範囲にする（0 や 7 は実在しない段なので出さない）
+  {key:'gear', name:'ギヤ',   unit:'',     fix:0, step:true, min:0.6, max:6.4},
+  {key:'rpm',  name:'回転数', unit:'rpm',  fix:0},
+  {key:'thr',  name:'スロットル', unit:'%', fix:1},
+  {key:'ect',  name:'水温',   unit:'℃',   fix:0},
+  {key:'volt', name:'電圧',   unit:'V',    fix:2},
+];
+
+function buildCharts() {
+  const side = $('side');
+  side.innerHTML = '';
+  for (const s of SERIES) {
+    const d = document.createElement('div');
+    d.className = 'chart';
+    d.innerHTML = `<h3>${s.name}<span id="v_${s.key}">--</span></h3><canvas id="c_${s.key}"></canvas>`;
+    side.appendChild(d);
+    s.canvas = d.querySelector('canvas');
+    bindCursor(s.canvas);
+  }
+  drawCharts();
+}
+
+function drawCharts() {
+  for (const s of SERIES) drawChart(s);
+}
+
+function drawChart(s) {
+  const cv = s.canvas, dpr = devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  if (!rows.length) return;
+
+  const vals = rows.map(r => r[s.key]);
+  const ok = vals.filter(v => v != null);
+  if (!ok.length) return;
+  let lo = s.min !== undefined ? s.min : Math.min(...ok);
+  let hi = s.max !== undefined ? s.max : Math.max(...ok);
+  if (hi === lo) { hi = lo + 1; }
+  // 範囲を明示した系列（ギヤ）は余白を足さない。目盛りが実在しない値になるため
+  const fixed = s.min !== undefined && s.max !== undefined;
+  const pad = fixed ? 0 : (hi - lo) * 0.08;
+  lo -= pad; hi += pad;
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
+  const X = t => 30 + (w - 36) * ((t - t0) / (t1 - t0 || 1));
+  const Y = v => h - 12 - (h - 20) * ((v - lo) / (hi - lo));
+
+  // 目盛りは控えめに。上下の 2 本だけ
+  g.strokeStyle = css('--line'); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(30, Y(hi - pad)); g.lineTo(w - 6, Y(hi - pad));
+  g.moveTo(30, Y(lo + pad)); g.lineTo(w - 6, Y(lo + pad)); g.stroke();
+  g.fillStyle = css('--mute'); g.font = '9px -apple-system,sans-serif'; g.textAlign = 'right';
+  g.fillText((hi - pad).toFixed(s.fix), 27, Y(hi - pad) + 3);
+  g.fillText((lo + pad).toFixed(s.fix), 27, Y(lo + pad) + 3);
+
+  // 2px の細い線。系列は 1 本なので色は共通のアクセント
+  g.strokeStyle = css('--accent'); g.lineWidth = 2;
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  g.beginPath();
+  let pen = false, px = 0, py = 0;
+  for (const r of rows) {
+    const v = r[s.key];
+    if (v == null) { pen = false; continue; }
+    const x = X(r.t), y = Y(v);
+    if (!pen) { g.moveTo(x, y); pen = true; }
+    else if (s.step) { g.lineTo(x, py); g.lineTo(x, y); }   // ギヤは階段
+    else { g.lineTo(x, y); }
+    px = x; py = y;
+  }
+  g.stroke();
+
+  // カーソル
+  if (cursor >= 0 && cursor < rows.length) {
+    const x = X(rows[cursor].t);
+    g.strokeStyle = css('--warn'); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 6); g.stroke();
+    const v = rows[cursor][s.key];
+    if (v != null) {
+      g.fillStyle = css('--warn');
+      g.beginPath(); g.arc(x, Y(v), 3, 0, 7); g.fill();
+    }
+  }
+}
+
+// ── 連動カーソル ─────────────────────────────────────────
+// チャートをなぞると、その時刻の値が見出しに出て地図上の位置も動く。
+function bindCursor(cv) {
+  const move = e => {
+    if (!rows.length) return;
+    const rect = cv.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
+    const t = t0 + (t1 - t0) * Math.max(0, Math.min(1, (cx - 30) / (rect.width - 36)));
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < rows.length; i++) {
+      const d = Math.abs(rows[i].t - t);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    setCursor(bi);
+    e.preventDefault();
+  };
+  cv.addEventListener('pointermove', move);
+  cv.addEventListener('pointerdown', move);
+  cv.addEventListener('pointerleave', () => setCursor(-1));
+}
+
+function setCursor(i) {
+  cursor = i;
+  const r = i >= 0 ? rows[i] : null;
+  for (const s of SERIES) {
+    const el = $('v_' + s.key);
+    const v = r ? r[s.key] : null;
+    el.textContent = v == null ? '--' : (+v).toFixed(s.fix) + (s.unit ? ' ' + s.unit : '');
+  }
+  if (marker && r && r.lat != null) { marker.setLatLng([r.lat, r.lon]); marker.setStyle({opacity:1, fillOpacity:1}); }
+  else if (marker) marker.setStyle({opacity:0, fillOpacity:0});
+  drawCharts();
+}
+
+// ── 表（色だけに頼らないための代替表現）───────────────────
+function showTable() {
+  const w = window.open('', '_blank');
+  if (!w) return;
+  const head = ['t_sec','rpm','速度','ギヤ','スロットル','水温','電圧','lat','lon'];
+  let html = `<meta charset="utf-8"><title>MC52 ログ</title>
+  <style>body{font:12px/1.5 -apple-system,sans-serif;background:#fff;color:#111;padding:1rem}
+  table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.15rem .4rem;text-align:right}
+  th{background:#eee}</style><table><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr>`;
+  for (const r of rows) {
+    html += '<tr>' + [r.t?.toFixed(2), r.rpm, r.spd, r.gear ?? '', r.thr?.toFixed(1),
+      r.ect, r.volt?.toFixed(2), r.lat?.toFixed(6) ?? '', r.lon?.toFixed(6) ?? '']
+      .map(v => `<td>${v ?? ''}</td>`).join('') + '</tr>';
+  }
+  w.document.write(html + '</table>');
+  w.document.close();
+}
+
+// ── 更新 ─────────────────────────────────────────────────
+function refresh() {
+  assignGears(+$('k').value, +$('tol').value);
+  // 地図側の失敗でチャートを巻き込まない
+  try { drawMap(); } catch (e) { console.warn('map:', e); }
+  drawCharts();
+  const n = rows.length;
+  const gps = rows.filter(r => r.lat != null).length;
+  const known = rows.filter(r => r.gear).length;
+  const rat = rows.filter(r => r.ratio != null).length;
+  const dur = n ? (rows[n-1].t - rows[0].t) : 0;
+  $('stat').textContent = `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
+    + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`;
+}
+
+$('file').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      rows = parseCsv(rd.result);
+      $('fit').disabled = false; $('tbl').disabled = false;
+      const k = fitK();
+      if (k) $('k').value = k.toFixed(4);
+      buildCharts();
+      refresh();
+    } catch (err) {
+      $('stat').textContent = '読み込み失敗: ' + err.message;
+    }
+  };
+  rd.readAsText(f);
+};
+$('fit').onclick = () => { const k = fitK(); if (k) { $('k').value = k.toFixed(4); refresh(); } };
+$('k').oninput = refresh;
+$('tol').oninput = refresh;
+$('tbl').onclick = showTable;
+addEventListener('resize', () => { drawCharts(); if (map) map.invalidateSize(); });
+</script>
