@@ -201,13 +201,20 @@ def hist(pts, k, width=54):
 
 
 def linearity(pts):
-    """0D と GPS 速度の比が速度域で一定か（単一 k が成り立つかの検査）。"""
+    """0D と GPS 速度の比が速度域で一定か（単一 k が成り立つかの検査）。
+
+    見るのは**水準ではなく速度域による変動**。比の水準はスプロケット丁数と
+    タイヤ外径で動く（純正 14T なら ≒1.07、15T 化車なら ≒1.00）ので、
+    1.0 から離れていること自体は異常ではない。詳細は FINDINGS.md。
+    """
     have = [p for p in pts if p.get("gps") and p["gps"] > 5 and p["spd"] > 5]
     if len(have) < 20:
         print("\n  線形性検査: GPS 速度のある定常点が不足（%d 点）。判定不能" % len(have))
         return
     bands = [(0, 30), (30, 50), (50, 70), (70, 200)]
     print("\n  0D / GPS 速度比（単一 k の妥当性）")
+    print("  ※ 見るのは速度域による変動。比の水準はスプロケ丁数とタイヤで動くので")
+    print("     1.0 から離れていること自体は異常ではない")
     print("  速度域        n    比     ばらつき")
     vals = []
     for lo, hi in bands:
