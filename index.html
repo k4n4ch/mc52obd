@@ -1,0 +1,774 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CB250R OBD</title>
+<style>
+:root{
+  --bg:#07090d; --panel:#11151c; --line:#232b38;
+  --fg:#e8eef7; --dim:#7d8899; --accent:#4da3ff;
+  --ok:#38d977; --warn:#ffb020; --bad:#ff4d5e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:-apple-system,"Helvetica Neue",Roboto,sans-serif;
+  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
+  display:flex; flex-direction:column; overflow:hidden;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ── ステータスバー ─────────────────────────── */
+#status{
+  display:flex; gap:.5rem; align-items:center;
+  padding:.35rem .6rem; background:var(--panel);
+  border-bottom:1px solid var(--line); font-size:.72rem; flex:0 0 auto;
+}
+.chip{
+  display:flex; align-items:center; gap:.28rem;
+  padding:.16rem .45rem; border-radius:999px;
+  background:#0c1016; border:1px solid var(--line); color:var(--dim);
+}
+.chip.on{color:var(--fg); border-color:var(--accent)}
+.chip.rec{color:#fff; background:#7a1220; border-color:var(--bad)}
+.dot{width:.5rem;height:.5rem;border-radius:50%;background:#39414f}
+.chip.on .dot{background:var(--ok)}
+.chip.rec .dot{background:var(--bad); animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:.15}}
+#ver{margin-left:auto; color:#5b6472; font-size:.66rem; letter-spacing:.04em; white-space:nowrap}
+#hz{margin-left:.55rem; color:var(--dim); white-space:nowrap}
+
+/* 誤ったドングルへの接続を知らせる帯。ログは畳んであるので見落とす */
+#alert{flex:0 0 auto; display:none; padding:.5rem .7rem; font-size:.8rem; line-height:1.4;
+       background:#5c0f1b; border-bottom:1px solid var(--bad); color:#ffd9de}
+#alert.show{display:block}
+#alert.warn{background:#5a4310; border-color:var(--warn); color:#ffe9c2}
+#alert b{color:#fff}
+
+/* ── 計器 ───────────────────────────────────── */
+/* 回転・速度・ギヤを同じ高さで 3 段。突出した主役を作らない配分。 */
+#gauges{flex:1 1 auto; display:grid; grid-template-rows:1fr 1fr 1fr auto;
+        gap:.4rem; padding:.4rem; min-height:0}
+
+.row{background:var(--panel); border:1px solid var(--line); border-radius:.5rem;
+     position:relative; display:flex; align-items:center; justify-content:center;
+     min-height:0; overflow:hidden}
+.row .lbl{position:absolute; top:.32rem; left:.6rem;
+          font-size:.66rem; color:var(--dim); letter-spacing:.14em}
+.row .sub{position:absolute; bottom:.3rem; right:.6rem; font-size:.68rem; color:var(--dim)}
+/* 行の高さと画面幅の小さい側で決める。幅の制約は 4 桁の回転数が握る */
+.val{font-weight:700; line-height:.9; letter-spacing:-.02em; font-size:min(36vw,20vh)}
+
+/* 回転バーは回転の行の下端に敷く */
+#rpmbar{position:absolute; left:.5rem; right:.5rem; bottom:.4rem; height:.5rem;
+        background:#0c1016; border:1px solid var(--line); border-radius:999px; overflow:hidden}
+#rpmfill{height:100%; width:0%; transition:width .1s linear;
+         background:linear-gradient(90deg,#2a6fb8,#4da3ff 60%,#ffb020 82%,#ff4d5e 95%)}
+
+/* 副表示 4 枠 */
+#secondary{flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem}
+.cell{background:var(--panel); border:1px solid var(--line); border-radius:.4rem;
+      padding:.32rem .2rem; text-align:center}
+.cell .lbl{font-size:.6rem; color:var(--dim); letter-spacing:.1em}
+.cell .val{font-size:clamp(1rem,5.4vw,1.6rem); font-weight:600; line-height:1.15}
+.cell.warn .val{color:var(--warn)} .cell.bad .val{color:var(--bad)}
+.stale{opacity:.42}
+
+/* ── 操作 ───────────────────────────────────── */
+#bar{flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem;
+     padding:.4rem; border-top:1px solid var(--line); background:var(--panel)}
+button{
+  font:inherit; font-size:.8rem; font-weight:600; color:var(--fg);
+  background:#161c25; border:1px solid var(--line); border-radius:.4rem;
+  padding:.62rem .2rem; cursor:pointer; -webkit-tap-highlight-color:transparent;
+}
+button:active{background:#202834}
+button:disabled{opacity:.35}
+/* 状態ボタン(接続/REC/GPS)は効力が続いている間ずっと点灯させる */
+button.active{background:#12314f; border-color:var(--accent); color:#cfe6ff}
+button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
+
+/* ── ログ ───────────────────────────────────── */
+#log{flex:0 0 auto; height:0; overflow-y:auto; background:#05070a;
+     border-top:1px solid var(--line); font:11px/1.45 ui-monospace,Menlo,monospace;
+     padding:0 .5rem; transition:height .15s}
+#log.open{height:34vh; padding:.4rem .5rem}
+#log div{white-space:pre-wrap; word-break:break-all}
+.e{color:var(--bad)} .ok{color:var(--ok)} .tx{color:var(--dim)} .w{color:var(--warn)}
+
+/* 横向きは縦が足りない。3 段を横 3 列に組み替える */
+@media(orientation:landscape) and (max-height:560px){
+  #gauges{grid-template-rows:1fr auto; grid-template-columns:repeat(3,1fr)}
+  #secondary{grid-column:1 / -1}
+  .val{font-size:min(13vw,26vh)}
+}
+</style>
+
+<div id="status">
+  <span class="chip" id="cBle"><span class="dot"></span>BLE</span>
+  <span class="chip" id="cRec"><span class="dot"></span>REC</span>
+  <span class="chip" id="cGps"><span class="dot"></span>GPS</span>
+  <span id="ver"></span>
+  <span id="hz">-- Hz</span>
+</div>
+<div id="alert"></div>
+
+<div id="gauges">
+  <div class="row">
+    <div class="lbl">RPM</div>
+    <div class="val stale" id="rpmv">----</div>
+    <div id="rpmbar"><div id="rpmfill"></div></div>
+  </div>
+
+  <div class="row">
+    <div class="lbl">SPEED km/h</div>
+    <div class="val stale" id="spdv">--</div>
+    <div class="sub" id="gpsspd">GPS --</div>
+  </div>
+
+  <div class="row">
+    <div class="lbl">GEAR</div>
+    <div class="val stale" id="gearv">?</div>
+    <div class="sub" id="ratio">比 --</div>
+  </div>
+
+  <div id="secondary">
+    <div class="cell"><div class="lbl">THR %</div><div class="val stale" id="thrv">--</div></div>
+    <div class="cell"><div class="lbl">LOAD %</div><div class="val stale" id="loadv">--</div></div>
+    <div class="cell" id="ectc"><div class="lbl">ECT °C</div><div class="val stale" id="ectv">--</div></div>
+    <div class="cell" id="voltc"><div class="lbl">VOLT</div><div class="val stale" id="voltv">--</div></div>
+  </div>
+</div>
+
+<div id="bar">
+  <button id="bConn">接続</button>
+  <button id="bRec" class="rec" disabled>REC</button>
+  <button id="bGps">GPS</button>
+  <button id="bLog">ログ</button>
+</div>
+<div id="log"></div>
+
+<script>
+'use strict';
+const VERSION = 'v20260823f';
+const APP = 'mc52obd ' + VERSION;
+
+/* ══════════════════════════════════════════════════════════
+ * CB250R (2018/MC52) — ELM327(BLE) 経由の OBD モニタ
+ *
+ * FL4 と違い物理層は K-Line (ISO 14230-4 KWP FAST, 10400bps)。
+ * 移植にあたっての差分は以下。詳細は FINDINGS.md。
+ *
+ *  1. プロトコルは 5 (ATSP5)。CAN ではないので ATSH/ATCRA は使わない
+ *  2. 応答ヘッダは 3 バイト形式 `8N F1 10`。先頭の 0x8N がモードバイト
+ *     以降の長さを持つ
+ *  3. **ELM327 は ISO 14230 のチェックサムを落とさない**。上記の長さで
+ *     切らないと最終バイトをデータと誤認する
+ *  4. **マルチ PID 一括要求 (010C0B110E) は無応答＝非対応**。1 要求 1 PID
+ *  5. 総リクエスト予算は実測 6.3 Hz (158ms/req) しかない。全部を毎周期
+ *     読むと 1 Hz を切るので、速い信号と遅い信号を階層化する
+ *  6. 0B(吸気管圧力) は単気筒の吸気脈動をそのまま返し、この周期では
+ *     エイリアシングして無意味なので採用しない
+ * ══════════════════════════════════════════════════════════ */
+
+// ── ポーリング対象 ────────────────────────────────────────
+// 速い層: 毎周期。遅い層: 1 周期に 1 個ずつ持ち回り(各 ≒2 秒に 1 回)
+const FAST = [0x0C, 0x0D, 0x11];
+const SLOW = [0x04, 0x42, 0x05, 0x03];
+
+// [データバイト数, 変換関数]  変換なし(ビットマップ)は null
+const PID = {
+  0x03: [2, null],
+  0x04: [1, d => d[0] * 100 / 255],
+  0x05: [1, d => d[0] - 40],
+  0x0C: [2, d => ((d[0] << 8) | d[1]) / 4],
+  0x0D: [1, d => d[0]],
+  0x11: [1, d => d[0] * 100 / 255],
+  0x42: [2, d => ((d[0] << 8) | d[1]) / 1000],
+};
+
+// 現在値
+const V = {rpm:null, spd:null, thr:null, load:null, ect:null, volt:null, fuelsys:null};
+
+// ── ログ ──────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+let logLines = 0;
+function log(s, cls) {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = new Date().toTimeString().slice(0, 8) + ' ' + s;
+  logEl.appendChild(d);
+  if (++logLines > 400) { logEl.firstChild.remove(); logLines--; }
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ══ BLE ══════════════════════════════════════════════════
+// ELM327 の BLE ドングルは 2 系統のサービス UUID を使う。
+// Chrome は optionalServices に短縮 UUID を渡すと弾くのでフル 128bit で指定。
+const SVC_UUIDS = [
+  '0000fff0-0000-1000-8000-00805f9b34fb',
+  'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+];
+
+let bleDevice = null, bleChar = null;
+let connected = false, userDisc = false, reconnecting = false;
+
+async function getBleChar(server) {
+  for (const uuid of SVC_UUIDS) {
+    try {
+      const svc = await server.getPrimaryService(uuid);
+      const chars = await svc.getCharacteristics();
+      log('サービス検出: ' + uuid.slice(4, 8), 'ok');
+      let notifyChar = null, writeChar = null;
+      for (const c of chars) {
+        if (c.properties.notify || c.properties.indicate) notifyChar = notifyChar || c;
+        if (c.properties.write || c.properties.writeWithoutResponse) writeChar = writeChar || c;
+      }
+      if (!writeChar && notifyChar) writeChar = notifyChar;
+      if (!notifyChar && writeChar) notifyChar = writeChar;
+      if (notifyChar) {
+        await notifyChar.startNotifications();
+        notifyChar.addEventListener('characteristicvaluechanged', onRx);
+      }
+      return writeChar;
+    } catch (e) { /* 次の UUID を試す */ }
+  }
+  throw new Error('対応サービスなし (FFF0/E781)');
+}
+
+async function connect() {
+  if (connected || reconnecting) { userDisc = true; disconnect(); return; }
+  if (!navigator.bluetooth) {
+    log('✗ Web Bluetooth 非対応', 'e');
+    log('✗ Android Chrome + HTTPS が必要', 'e');
+    return;
+  }
+  userDisc = false;
+  try {
+    log('デバイス選択...', 'tx');
+    try {
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [{namePrefix:'OBD'}, {namePrefix:'ELM'}, {namePrefix:'V-LINK'},
+                  {namePrefix:'Vgate'}, {services:[SVC_UUIDS[0]]}],
+        optionalServices: SVC_UUIDS,
+      });
+    } catch (e) {
+      if (e.name !== 'NotFoundError') throw e;
+      // 名前が想定と違うドングルのための逃げ道。一覧から手で選ぶ。
+      log('候補なし。全デバイスから選ぶ', 'w');
+      bleDevice = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true, optionalServices: SVC_UUIDS,
+      });
+    }
+    bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+    const server = await bleDevice.gatt.connect();
+    bleChar = await getBleChar(server);
+    connected = true;
+    setChip('cBle', true); setBtn('bConn', true, '切断');
+    document.getElementById('bRec').disabled = false;
+    log('接続: ' + (bleDevice.name || '?') + ' [' + bleDevice.id.slice(0, 8) + ']', 'ok');
+    checkKnownDevice();
+    const init = await initElm();
+    if (!verifyProtocol(init)) { userDisc = true; disconnect(); return; }
+    startPolling();
+    syncWakeLock();
+  } catch (e) {
+    log('接続失敗: ' + e.message, 'e');
+    disconnect();
+  }
+}
+
+function disconnect() {
+  stopPolling();
+  connected = false;
+  try { if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect(); } catch (e) {}
+  bleChar = null;
+  setChip('cBle', false); setBtn('bConn', false, '接続');
+  document.getElementById('bRec').disabled = true;
+  markAllStale();
+  syncWakeLock();
+}
+
+function onDisconnected() {
+  log('切断された', 'w');
+  stopPolling(); connected = false; bleChar = null;
+  setChip('cBle', false); setBtn('bConn', false, '接続');
+  markAllStale();
+  if (!userDisc) autoReconnect();
+}
+
+async function autoReconnect() {
+  if (reconnecting || userDisc) return;
+  reconnecting = true;
+  for (let i = 1; i <= 20 && !userDisc; i++) {
+    log(`再接続 ${i}/20 ...`, 'w');
+    try {
+      const server = await bleDevice.gatt.connect();
+      bleChar = await getBleChar(server);
+      connected = true;
+      setChip('cBle', true); setBtn('bConn', true, '切断');
+      log('再接続 成功', 'ok');
+      const init = await initElm();
+      if (!verifyProtocol(init)) { userDisc = true; disconnect(); reconnecting = false; return; }
+      startPolling();
+      reconnecting = false;
+      syncWakeLock();
+      return;
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  reconnecting = false;
+  log('再接続 断念', 'e');
+  syncWakeLock();   // 諦めた時点で保持をやめる（記録中なら保持は続く）
+}
+
+// ── 受信 ──────────────────────────────────────────────────
+// ELM327 は応答の終端に '>' プロンプトを返す。これを 1 ブロックの区切りにする。
+let rxBuf = '';
+let pendingWait = null;   // 初期化中、特定文字列を待つ
+let awaiting = null;      // ポーリング応答待ちの PID。同時 1 要求を保証する
+let stallCount = 0;
+const STALL_LIMIT = 6;
+
+function onRx(evt) {
+  rxBuf += new TextDecoder().decode(evt.target.value);
+  const parts = rxBuf.split('>');
+  let got = false;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const block = parts[i];
+    const prev = block.replace(/[\r\n]+/g, ' ').trim();
+    if (prev && logEl.classList.contains('open')) log('← ' + prev, 'ok');
+    if (pendingWait) { pendingWait.resolve(block); }
+    else if (awaiting !== null) { handlePid(awaiting, block); }
+    got = true;
+  }
+  rxBuf = parts[parts.length - 1];
+  if (got) stallCount = 0;
+  if (got && connected && polling && !pendingWait) {
+    // 待っていない応答＝破棄済みの古い要求。ここで次を撃つとチェーンが増殖する
+    if (awaiting === null) return;
+    awaiting = null;
+    sendNextPid();
+  }
+}
+
+function waitFor(str, timeout) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { pendingWait = null; reject(new Error('timeout ' + str)); }, timeout);
+    pendingWait = {resolve(txt){ clearTimeout(t); pendingWait = null; resolve(txt); }};
+  });
+}
+
+async function sendRaw(s) {
+  if (!bleChar) return;
+  if (logEl.classList.contains('open')) log('→ ' + s, 'tx');
+  await bleChar.writeValue(new TextEncoder().encode(s + '\r'));
+}
+
+async function cmd(s, timeout) {
+  const p = waitFor(s, timeout || 5000);
+  await sendRaw(s);
+  return p;
+}
+
+// ── 初期化 ────────────────────────────────────────────────
+async function initElm() {
+  log('ELM327 初期化...', 'tx');
+  await cmd('ATZ', 8000);
+  for (const c of ['ATE0', 'ATL0', 'ATS0', 'ATH1']) await cmd(c);
+  // 応答待ちを詰めて 306ms/req → 158ms/req。欠測が増えるなら ATST を伸ばす
+  await cmd('ATAT0');
+  await cmd('ATST14');       // 0x14 = 20 → 80ms
+  await cmd('ATSP5');        // ISO 14230-4 KWP FAST（実測で確定済み）
+  const r = await cmd('0100', 15000);
+  if (/UNABLE|ERROR|NO DATA/i.test(r)) {
+    log('ATSP5 で確立できず、自動探索へ', 'w');
+    await cmd('ATSP0');
+    await cmd('0100', 20000);
+  }
+  const dp = (await cmd('ATDP', 5000)).replace(/[\r\n]+/g, ' ').trim();
+  const dpn = (await cmd('ATDPN', 5000)).replace(/[\r\n]+/g, ' ').trim();
+  log('プロトコル: ' + dp + ' (' + dpn + ')', 'ok');
+  return {dp, dpn};
+}
+
+/* ══ ドングルの取り違え対策 ═══════════════════════════════
+ * FL4 用と CB250R 用のドングルはどちらも 'OBDII' を名乗り、名前では
+ * 区別できない。判定は 2 段構えにする。
+ *
+ *  1. BluetoothDevice.id を localStorage に覚えておき、違うものが
+ *     選ばれたら即警告する（同一オリジンで安定した識別子）
+ *  2. 接続後の ATDPN で確定判定する。CB250R は K-Line、FL4 は CAN
+ *
+ * 1 は速いが確証がなく、2 は確実だがバイクの電源が要る。両方使う。
+ * 2 で正しいと確認できた時だけ 1 の記憶を更新するので、ドングルを
+ * 買い替えても自動で追随する。
+ * ══════════════════════════════════════════════════════ */
+const DEV_KEY = 'cb250r_dev';
+
+// ELM327 のプロトコル番号: 3=ISO9141-2, 4/5=ISO14230-4, 6以降=CAN 系
+// ATDPN は自動探索時に 'A5' のように先頭 A が付く
+function protoClass(dpn) {
+  const n = (dpn || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase().replace(/^A/, '');
+  if (['3', '4', '5'].includes(n)) return 'kline';
+  if (['6', '7', '8', '9', 'A', 'B', 'C'].includes(n)) return 'can';
+  return 'unknown';
+}
+
+function showAlert(html, level) {
+  const el = $('alert');
+  el.innerHTML = html;
+  el.className = 'show' + (level === 'warn' ? ' warn' : '');
+}
+function clearAlert() { $('alert').className = ''; }
+
+// 接続直後、初期化の前に呼ぶ。記憶と違えば警告するが接続は止めない
+function checkKnownDevice() {
+  const known = localStorage.getItem(DEV_KEY);
+  if (known && bleDevice.id !== known) {
+    log('前回と違う device.id', 'w');
+    showAlert('前回と<b>違うドングル</b>を選んだ。プロトコルで確認する…', 'warn');
+    return false;
+  }
+  return true;
+}
+
+// 初期化の後に呼ぶ。CAN を検出したら誤ったドングルなので切る
+function verifyProtocol(init) {
+  const c = protoClass(init.dpn);
+  if (c === 'can') {
+    log('CAN を検出。FL4 側のドングル', 'e');
+    showAlert('<b>FL4 側のドングルです</b>（' + init.dp + '）。CB250R は K-Line なので切断した。');
+    return false;
+  }
+  if (c === 'kline') {
+    // 正しいと確認できた時だけ記憶を更新する
+    localStorage.setItem(DEV_KEY, bleDevice.id);
+    clearAlert();
+    return true;
+  }
+  showAlert('プロトコル未確定（<b>' + init.dp + '</b>）。バイクの電源が入っていない可能性がある。', 'warn');
+  return true;   // 電源待ちかもしれないので接続は維持する
+}
+
+// ── 応答の解釈 ────────────────────────────────────────────
+// `8N F1 10 41 <pid> <data...> <checksum>` から data だけを取り出す。
+function parseObd(block, pid) {
+  for (const raw of block.split(/[\r\n]+/)) {
+    let h = raw.replace(/\s/g, '').toUpperCase();
+    if (!h || !/^[0-9A-F]+$/.test(h)) continue;
+    if (h.length % 2) h = '0' + h;
+    const b = [];
+    for (let i = 0; i < h.length; i += 2) b.push(parseInt(h.substr(i, 2), 16));
+    for (let i = 0; i < b.length - 1; i++) {
+      if (b[i] !== 0x41 || b[i + 1] !== pid) continue;
+      let data = b.slice(i + 2);
+      const lens = [];
+      // 形式バイト 0x8N の下位 6bit = モードバイト以降の長さ
+      if (i > 0 && (b[0] & 0xC0) === 0x80 && (b[0] & 0x3F)) lens.push((b[0] & 0x3F) - 2);
+      if (PID[pid]) lens.push(PID[pid][0]);
+      const n = Math.min.apply(null, lens.filter(x => x > 0));
+      if (isFinite(n) && data.length >= n) data = data.slice(0, n);
+      return data;
+    }
+  }
+  return null;
+}
+
+function handlePid(pid, block) {
+  const data = parseObd(block, pid);
+  if (!data) { misses++; return; }
+  hits++;
+  const conv = PID[pid][1];
+  const val = conv ? conv(data) : data.map(x => x.toString(16).padStart(2,'0').toUpperCase()).join('');
+  switch (pid) {
+    case 0x0C: V.rpm = val; break;
+    case 0x0D: V.spd = val; break;
+    case 0x11: V.thr = val; break;
+    case 0x04: V.load = val; break;
+    case 0x05: V.ect = val; break;
+    case 0x42: V.volt = val; break;
+    case 0x03: V.fuelsys = val; break;
+  }
+  render();
+  // 1 周期につき 1 行。速い層の先頭(0x0C)を周期の起点とする
+  if (recording && pid === FAST[0]) pushRow();
+}
+
+// ── ポーリング ────────────────────────────────────────────
+// レスポンス駆動: '>' を受けたら即次を送る。タイマー駆動より詰められる。
+let polling = false, cycle = 0, fastIdx = 0;
+let hits = 0, misses = 0, rateT0 = 0, rateN = 0;
+let watchdog = null;
+
+function startPolling() {
+  polling = true; cycle = 0; fastIdx = 0; awaiting = null;
+  hits = misses = rateN = 0; rateT0 = performance.now();
+  sendNextPid();
+  watchdog = setInterval(() => {
+    if (!polling || !connected) return;
+    if (awaiting !== null) {
+      // 応答が返らないまま次の点検を迎えた＝取りこぼし
+      if (++stallCount >= STALL_LIMIT) {
+        log('無応答が続く。再接続する', 'e');
+        stallCount = 0;
+        try { bleDevice.gatt.disconnect(); } catch (e) {}
+        return;
+      }
+      awaiting = null;
+      misses++;
+      sendNextPid();
+    }
+    const dt = (performance.now() - rateT0) / 1000;
+    if (dt >= 2) {
+      document.getElementById('hz').textContent =
+        (rateN / dt).toFixed(1) + ' Hz' + (misses ? '  欠測' + misses : '');
+      rateT0 = performance.now(); rateN = 0;
+    }
+  }, 700);
+}
+
+function stopPolling() {
+  polling = false; awaiting = null;
+  if (watchdog) { clearInterval(watchdog); watchdog = null; }
+}
+
+// 速い層を順に撃ち、1 周したら遅い層を 1 個だけ差し込む
+function sendNextPid() {
+  if (!polling || !connected) return;
+  let pid;
+  if (fastIdx < FAST.length) {
+    pid = FAST[fastIdx++];
+  } else {
+    fastIdx = 0;
+    pid = SLOW[cycle % SLOW.length];
+    cycle++;
+    rateN++;   // 1 周 = 1 サンプル
+  }
+  awaiting = pid;
+  sendRaw('01' + pid.toString(16).padStart(2, '0').toUpperCase()).catch(e => {
+    log('送信失敗: ' + e.message, 'e');
+  });
+}
+
+// ══ 表示 ═════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+
+function setTxt(id, v, digits) {
+  const el = $(id);
+  if (v === null || v === undefined) { el.textContent = '--'; el.classList.add('stale'); return; }
+  el.textContent = (digits === undefined) ? v : Number(v).toFixed(digits);
+  el.classList.remove('stale');
+}
+
+function markAllStale() {
+  ['rpmv','spdv','gearv','thrv','loadv','ectv','voltv'].forEach(id => $(id).classList.add('stale'));
+}
+
+const RPM_MAX = 10500;   // CB250R のレッドゾーン手前まで。バーの目盛り基準
+function render() {
+  setTxt('rpmv', V.rpm, 0);
+  setTxt('spdv', V.spd, 0);
+  setTxt('thrv', V.thr, 0);
+  setTxt('loadv', V.load, 0);
+  setTxt('ectv', V.ect, 0);
+  setTxt('voltv', V.volt, 1);
+
+  if (V.rpm !== null) $('rpmfill').style.width = Math.min(100, V.rpm / RPM_MAX * 100) + '%';
+
+  // 水温・電圧の警告域
+  cls('ectc', V.ect === null ? '' : V.ect >= 110 ? 'bad' : V.ect >= 103 ? 'warn' : '');
+  cls('voltc', V.volt === null ? '' : (V.volt < 12.0 || V.volt > 15.2) ? 'bad'
+             : (V.volt < 12.8 || V.volt > 14.9) ? 'warn' : '');
+
+  // ギヤ判定は未較正。比だけ出して、実走ログでクラスタが割れるかを確かめる段階。
+  // rpm/車速比が 6 個のクラスタに分離することを確認してから判定を入れる。
+  if (V.rpm !== null && V.spd !== null && V.spd >= 8) {
+    $('ratio').textContent = '比 ' + (V.rpm / V.spd).toFixed(1);
+  } else {
+    $('ratio').textContent = '比 --';
+  }
+}
+
+function cls(id, c) {
+  const el = $(id);
+  el.classList.remove('warn', 'bad');
+  if (c) el.classList.add(c);
+}
+
+function setChip(id, on, recMode) {
+  const el = $(id);
+  el.classList.toggle('on', on && !recMode);
+  el.classList.toggle('rec', !!(on && recMode));
+}
+function setBtn(id, on, label) {
+  const el = $(id);
+  el.classList.toggle('active', on);
+  if (label) el.textContent = label;
+}
+
+// ══ GPS ══════════════════════════════════════════════════
+// 走行の記録は個人の移動履歴にあたる。端末内に留め、書き出しは手動操作でのみ行う。
+let gpsEnabled = localStorage.getItem('cb250r_gps') === '1';
+let gpsWatch = null;
+let gpsBuf = [];          // {t, lat, lon, spd, alt, acc}
+let gpsLast = null;
+
+function startGps() {
+  if (!navigator.geolocation) { log('GPS: 非対応', 'e'); return; }
+  if (gpsWatch != null) return;
+  gpsWatch = navigator.geolocation.watchPosition(
+    p => {
+      gpsLast = p;
+      const spd = p.coords.speed == null ? null : p.coords.speed * 3.6;
+      $('gpsspd').textContent = 'GPS ' + (spd == null ? '--' : spd.toFixed(0));
+      if (recording) {
+        gpsBuf.push({t: p.timestamp, lat: p.coords.latitude, lon: p.coords.longitude,
+                     spd, alt: p.coords.altitude, acc: p.coords.accuracy});
+      }
+    },
+    e => log('GPS: ' + e.message, 'e'),
+    {enableHighAccuracy: true, maximumAge: 1000, timeout: 15000}
+  );
+  log('GPS 開始', 'ok');
+}
+function stopGps() {
+  if (gpsWatch != null) { navigator.geolocation.clearWatch(gpsWatch); gpsWatch = null; }
+  $('gpsspd').textContent = 'GPS --';
+}
+
+// ══ 記録 ═════════════════════════════════════════════════
+let recording = false;
+let obdRows = [];         // {t, rpm, spd, thr, load, ect, volt, fuelsys}
+let recT0 = 0;
+
+function pushRow() {
+  obdRows.push({
+    t: Date.now(),
+    rpm: V.rpm, spd: V.spd, thr: V.thr,
+    load: V.load, ect: V.ect, volt: V.volt, fuelsys: V.fuelsys,
+  });
+}
+
+function toggleRec() {
+  recording = !recording;
+  if (recording) {
+    obdRows = []; gpsBuf = []; recT0 = Date.now();
+    if (gpsEnabled) startGps();
+    log('記録開始', 'ok');
+  } else {
+    log(`記録終了 OBD ${obdRows.length} 行 / GPS ${gpsBuf.length} 点`, 'ok');
+    if (obdRows.length) exportCsv();
+    if (gpsBuf.length) exportGpx();
+    if (!gpsEnabled) stopGps();
+  }
+  setChip('cRec', recording, true);
+  setBtn('bRec', recording, recording ? '停止' : 'REC');
+  syncWakeLock();
+}
+
+function dl(text, mime, ext) {
+  const name = 'cb250r_' + new Date(recT0).toISOString().slice(0, 19).replace(/[:T]/g, '-') + ext;
+  const url = URL.createObjectURL(new Blob([text], {type: mime}));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  log('保存: ' + name, 'ok');
+}
+
+// OBD と GPS を時刻で結合した解析用 CSV。ギヤ判定の較正はこれを使う。
+function exportCsv() {
+  const head = 't_sec,iso_time,rpm,speed_obd,throttle,load,ect,volt,fuelsys,' +
+               'lat,lon,speed_gps,alt,gps_acc\n';
+  let gi = 0;
+  const body = obdRows.map(r => {
+    // 直近の GPS fix を 2 秒以内に限って結合する
+    while (gi + 1 < gpsBuf.length && Math.abs(gpsBuf[gi + 1].t - r.t) <= Math.abs(gpsBuf[gi].t - r.t)) gi++;
+    const g = (gpsBuf.length && Math.abs(gpsBuf[gi].t - r.t) <= 2000) ? gpsBuf[gi] : null;
+    const f = (v, d) => v === null || v === undefined ? '' : (d === undefined ? v : Number(v).toFixed(d));
+    return [
+      ((r.t - recT0) / 1000).toFixed(2), new Date(r.t).toISOString(),
+      f(r.rpm, 0), f(r.spd, 0), f(r.thr, 2), f(r.load, 2), f(r.ect, 0), f(r.volt, 2),
+      r.fuelsys == null ? '' : r.fuelsys,
+      g ? g.lat.toFixed(7) : '', g ? g.lon.toFixed(7) : '',
+      g && g.spd != null ? g.spd.toFixed(2) : '',
+      g && g.alt != null ? g.alt.toFixed(1) : '', g ? g.acc.toFixed(1) : '',
+    ].join(',');
+  }).join('\n');
+  dl(head + body + '\n', 'text/csv', '.csv');
+}
+
+const GPX_SEG_GAP = 10;   // 秒。これを超える間隔で trkseg を切る
+function exportGpx() {
+  const segs = []; let cur = []; let prev = null;
+  for (const p of gpsBuf) {
+    if (prev != null && (p.t - prev) / 1000 > GPX_SEG_GAP) { segs.push(cur); cur = []; }
+    cur.push(p); prev = p.t;
+  }
+  if (cur.length) segs.push(cur);
+  const body = segs.map(s => '<trkseg>\n' + s.map(p =>
+    `<trkpt lat="${p.lat.toFixed(7)}" lon="${p.lon.toFixed(7)}">` +
+    (p.alt != null ? `<ele>${p.alt.toFixed(1)}</ele>` : '') +
+    `<time>${new Date(p.t).toISOString()}</time></trkpt>`
+  ).join('\n') + '\n</trkseg>').join('\n');
+  dl('<?xml version="1.0" encoding="UTF-8"?>\n' +
+     '<gpx version="1.1" creator="mc52obd" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+     '<trk><name>CB250R</name>\n' + body + '\n</trk>\n</gpx>\n',
+     'application/gpx+xml', '.gpx');
+}
+
+// ══ Wake Lock ════════════════════════════════════════════
+// 走行中に画面が消えるとページが hidden になり JS のタイマーごと凍結する。
+// fl4obd の実測では 20〜46 秒の凍結が起き、ストール検出でも拾えなかった。
+//
+// 記録中に限らず「繋がっている間は常に」保持する。計器だけ見る使い方でも
+// 画面が消えれば同じように止まるため。再接続中も保持したままにする。
+let wakeLock = null;
+
+// 保持すべき状態かどうかを一箇所で判定する。状態が変わるたびに呼ぶ。
+function syncWakeLock() {
+  if (connected || reconnecting || recording) requestWakeLock();
+  else releaseWakeLock();
+}
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator) || wakeLock) return;
+  try {
+    const wl = await navigator.wakeLock.request('screen');
+    wakeLock = wl;
+    wl.addEventListener('release', () => { if (wakeLock === wl) wakeLock = null; });
+  } catch (e) { log('画面ロック取得失敗: ' + e.message, 'w'); }
+}
+function releaseWakeLock() {
+  if (!wakeLock) return;
+  const wl = wakeLock; wakeLock = null;
+  wl.release().catch(() => {});
+}
+// 画面が隠れるとブラウザが Wake Lock を解放するので、戻ったら取り直す
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') syncWakeLock();
+});
+
+// ══ 操作 ═════════════════════════════════════════════════
+$('bConn').onclick = connect;
+$('bRec').onclick = toggleRec;
+$('bGps').onclick = () => {
+  gpsEnabled = !gpsEnabled;
+  localStorage.setItem('cb250r_gps', gpsEnabled ? '1' : '0');
+  setBtn('bGps', gpsEnabled);
+  setChip('cGps', gpsEnabled);
+  if (gpsEnabled) startGps(); else stopGps();
+};
+$('alert').onclick = clearAlert;   // タップで消す
+$('bLog').onclick = () => {
+  logEl.classList.toggle('open');
+  setBtn('bLog', logEl.classList.contains('open'));
+};
+
+$('ver').textContent = VERSION;
+setBtn('bGps', gpsEnabled);
+setChip('cGps', gpsEnabled);
+if (gpsEnabled) startGps();
+log(APP, 'ok');
+if (!navigator.bluetooth) log('✗ Android Chrome + HTTPS が必要', 'e');
+</script>

@@ -1,0 +1,1232 @@
+{
+  "timestamp": "2026-08-23T14:21:11",
+  "vehicle": "Honda CB250R 2018 (MC52)",
+  "device": "6915D2D0-E7ED-1B8F-B87D-CEDDBF1FB1C3",
+  "protocol": "AUTO,",
+  "protocol_num": "A5",
+  "bitmaps": {
+    "00": "FE3EF011",
+    "20": "80040001",
+    "40": "C8008001",
+    "60": "08000001",
+    "80": "00000001",
+    "A0": "00000001",
+    "C0": "00000001",
+    "E0": "00000000"
+  },
+  "supported": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "0B",
+    "0C",
+    "0D",
+    "0E",
+    "0F",
+    "11",
+    "12",
+    "13",
+    "14",
+    "1C",
+    "20",
+    "21",
+    "2E",
+    "40",
+    "41",
+    "42",
+    "45",
+    "51",
+    "60",
+    "65",
+    "80",
+    "A0",
+    "C0",
+    "E0"
+  ],
+  "pids": [
+    {
+      "pid": "01",
+      "name": "Monitor status since DTCs cleared",
+      "raw": "00022000",
+      "value": null,
+      "unit": "",
+      "header": "86F110",
+      "responders": 1
+    },
+    {
+      "pid": "02",
+      "name": "Freeze DTC",
+      "raw": "0000",
+      "value": null,
+      "unit": "",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "03",
+      "name": "Fuel system status",
+      "raw": "0100",
+      "value": null,
+      "unit": "",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "04",
+      "name": "Calculated engine load",
+      "raw": "69",
+      "value": 41.176,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "05",
+      "name": "Engine coolant temperature",
+      "raw": "52",
+      "value": 42,
+      "unit": "degC",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "06",
+      "name": "Short term fuel trim b1",
+      "raw": "80",
+      "value": 0.0,
+      "unit": "%",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "07",
+      "name": "Long term fuel trim b1",
+      "raw": "80",
+      "value": 0.0,
+      "unit": "%",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "0B",
+      "name": "Intake manifold absolute pressure",
+      "raw": "2A",
+      "value": 42,
+      "unit": "kPa",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "0C",
+      "name": "Engine speed",
+      "raw": "15FC",
+      "value": 1407.0,
+      "unit": "rpm",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "0D",
+      "name": "Vehicle speed",
+      "raw": "00",
+      "value": 0,
+      "unit": "km/h",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "0E",
+      "name": "Timing advance",
+      "raw": "A6",
+      "value": 19.0,
+      "unit": "deg",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "0F",
+      "name": "Intake air temperature",
+      "raw": "4F",
+      "value": 39,
+      "unit": "degC",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "11",
+      "name": "Throttle position",
+      "raw": "1A",
+      "value": 10.196,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "12",
+      "name": "Commanded secondary air status",
+      "raw": "01",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "13",
+      "name": "O2 sensors present (2 banks)",
+      "raw": "01",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "14",
+      "name": "O2 S1 voltage / STFT",
+      "raw": "AC80",
+      "value": 0.86,
+      "unit": "V",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "1C",
+      "name": "OBD standards conformance",
+      "raw": "28",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "21",
+      "name": "Distance with MIL on",
+      "raw": "0000",
+      "value": 0,
+      "unit": "km",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "2E",
+      "name": "Commanded evaporative purge",
+      "raw": "00",
+      "value": 0.0,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "41",
+      "name": "Monitor status this drive cycle",
+      "raw": "00222020",
+      "value": null,
+      "unit": "",
+      "header": "86F110",
+      "responders": 1
+    },
+    {
+      "pid": "42",
+      "name": "Control module voltage",
+      "raw": "3520",
+      "value": 13.6,
+      "unit": "V",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "45",
+      "name": "Relative throttle position",
+      "raw": "00",
+      "value": 0.0,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "51",
+      "name": "Fuel type",
+      "raw": "01",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "65",
+      "name": "?",
+      "raw": "04002F",
+      "value": null,
+      "unit": "",
+      "header": "84F110",
+      "responders": 1
+    }
+  ],
+  "undeclared": [],
+  "declared_no_response": [],
+  "services": {
+    "dtc_stored": [
+      "87F11043000000000000CB"
+    ],
+    "dtc_pending": [
+      "87F11047000000000000CF"
+    ],
+    "dtc_permanent": [
+      "NO DATA"
+    ],
+    "mode09_supported": [
+      "87F1104900013CC00001CF"
+    ],
+    "mode09_supported_pids": [
+      "03",
+      "04",
+      "05",
+      "06",
+      "09",
+      "0A",
+      "20"
+    ],
+    "mode09_03": [
+      "83F110490304D4"
+    ],
+    "mode09_04": [
+      "87F1104904013031303299",
+      "87F11049040241323036B0",
+      "87F1104904033031000039",
+      "87F11049040400000000D9"
+    ],
+    "mode09_05": [
+      "83F110490501D3"
+    ],
+    "mode09_06": [
+      "87F110490601AA42A9BE2B"
+    ],
+    "mode09_09": [
+      "83F110490905DB"
+    ],
+    "mode09_0A": [
+      "87F110490A0145434D20D1",
+      "87F110490A022D456E6724",
+      "87F110490A03696E65435D",
+      "87F110490A046F6E7472A2"
+    ],
+    "mode09_20": [
+      "87F11049200100000001F3"
+    ],
+    "mode22_probe": {
+      "0000": [
+        "NO DATA"
+      ],
+      "F190": [
+        "NO DATA"
+      ],
+      "F1A0": [
+        "NO DATA"
+      ],
+      "0100": [
+        "NO DATA"
+      ],
+      "0101": [
+        "NO DATA"
+      ],
+      "F810": [
+        "NO DATA"
+      ]
+    }
+  },
+  "raw_log": {
+    "ATZ": [
+      "ELM327 v2.1"
+    ],
+    "ATE0": [
+      "OK"
+    ],
+    "ATL0": [
+      "OK"
+    ],
+    "ATS0": [
+      "OK"
+    ],
+    "ATAT1": [
+      "OK"
+    ],
+    "ATH1": [
+      "OK"
+    ],
+    "ATSP0": [
+      "OK"
+    ],
+    "0100": [
+      "OK",
+      "86F1104100FE3EF01105"
+    ],
+    "ATDP": [
+      "AUTO,",
+      "ISO 14230-4 (KWP FAST)"
+    ],
+    "ATDPN": [
+      "A5"
+    ],
+    "0100#1": [
+      "86F1104100FE3EF01105"
+    ],
+    "0120": [
+      "86F1104120800400016D"
+    ],
+    "0140": [
+      "86F1104140C800800151"
+    ],
+    "0160": [
+      "86F11041600800000131"
+    ],
+    "0180": [
+      "86F11041800000000149"
+    ],
+    "01A0": [
+      "NO DATA"
+    ],
+    "01A0#2": [
+      "86F11041A00000000169"
+    ],
+    "01C0": [
+      "NO DATA"
+    ],
+    "01C0#2": [
+      "86F11041C00000000189"
+    ],
+    "01E0": [
+      "86F11041E000000000A8"
+    ],
+    "0101": [
+      "86F110410100022000EB"
+    ],
+    "0102": [
+      "84F11041020000C8"
+    ],
+    "0103": [
+      "84F11041030100CA"
+    ],
+    "0104": [
+      "NO DATA"
+    ],
+    "0104#2": [
+      "83F11041046932"
+    ],
+    "0105": [
+      "83F1104105521C"
+    ],
+    "0106": [
+      "84F110410680004C"
+    ],
+    "0107": [
+      "NO DATA"
+    ],
+    "0107#2": [
+      "84F110410780004D"
+    ],
+    "0108": [
+      "NO DATA"
+    ],
+    "0109": [
+      "NO DATA"
+    ],
+    "010A": [
+      "NO DATA"
+    ],
+    "010B": [
+      "83F110410B2AFA"
+    ],
+    "010C": [
+      "84F110410C15FCE3"
+    ],
+    "010D": [
+      "NO DATA"
+    ],
+    "010D#2": [
+      "83F110410D00D2"
+    ],
+    "010E": [
+      "NO DATA"
+    ],
+    "010E#2": [
+      "NO DATA"
+    ],
+    "010E#3": [
+      "83F110410EA679"
+    ],
+    "010F": [
+      "83F110410F4F23"
+    ],
+    "0110": [
+      "NO DATA"
+    ],
+    "0111": [
+      "83F11041111AF0"
+    ],
+    "0112": [
+      "83F110411201D8"
+    ],
+    "0113": [
+      "83F110411301D9"
+    ],
+    "0114": [
+      "84F1104114AC8006"
+    ],
+    "0115": [
+      "NO DATA"
+    ],
+    "0116": [
+      "NO DATA"
+    ],
+    "0117": [
+      "NO DATA"
+    ],
+    "0118": [
+      "NO DATA"
+    ],
+    "0119": [
+      "NO DATA"
+    ],
+    "011A": [
+      "NO DATA"
+    ],
+    "011B": [
+      "NO DATA"
+    ],
+    "011C": [
+      "83F110411C2809"
+    ],
+    "011D": [
+      "NO DATA"
+    ],
+    "011E": [
+      "NO DATA"
+    ],
+    "011F": [
+      "NO DATA"
+    ],
+    "0121": [
+      "84F11041210000E7"
+    ],
+    "0122": [
+      "NO DATA"
+    ],
+    "0123": [
+      "NO DATA"
+    ],
+    "0124": [
+      "NO DATA"
+    ],
+    "0125": [
+      "NO DATA"
+    ],
+    "0126": [
+      "NO DATA"
+    ],
+    "0127": [
+      "NO DATA"
+    ],
+    "0128": [
+      "NO DATA"
+    ],
+    "0129": [
+      "NO DATA"
+    ],
+    "012A": [
+      "NO DATA"
+    ],
+    "012B": [
+      "NO DATA"
+    ],
+    "012C": [
+      "NO DATA"
+    ],
+    "012D": [
+      "NO DATA"
+    ],
+    "012E": [
+      "83F110412E00F3"
+    ],
+    "012F": [
+      "NO DATA"
+    ],
+    "0130": [
+      "NO DATA"
+    ],
+    "0131": [
+      "NO DATA"
+    ],
+    "0132": [
+      "NO DATA"
+    ],
+    "0133": [
+      "NO DATA"
+    ],
+    "0134": [
+      "NO DATA"
+    ],
+    "0135": [
+      "NO DATA"
+    ],
+    "0136": [
+      "NO DATA"
+    ],
+    "0137": [
+      "NO DATA"
+    ],
+    "0138": [
+      "NO DATA"
+    ],
+    "0139": [
+      "NO DATA"
+    ],
+    "013A": [
+      "NO DATA"
+    ],
+    "013B": [
+      "NO DATA"
+    ],
+    "013C": [
+      "NO DATA"
+    ],
+    "013D": [
+      "NO DATA"
+    ],
+    "013E": [
+      "NO DATA"
+    ],
+    "013F": [
+      "NO DATA"
+    ],
+    "0141": [
+      "86F1104141002220206B"
+    ],
+    "0142": [
+      "84F110414235205D"
+    ],
+    "0143": [
+      "NO DATA"
+    ],
+    "0144": [
+      "NO DATA"
+    ],
+    "0145": [
+      "83F1104145000A"
+    ],
+    "0146": [
+      "NO DATA"
+    ],
+    "0147": [
+      "NO DATA"
+    ],
+    "0148": [
+      "NO DATA"
+    ],
+    "0149": [
+      "NO DATA"
+    ],
+    "014A": [
+      "NO DATA"
+    ],
+    "014B": [
+      "NO DATA"
+    ],
+    "014C": [
+      "NO DATA"
+    ],
+    "014D": [
+      "NO DATA"
+    ],
+    "014E": [
+      "NO DATA"
+    ],
+    "014F": [
+      "NO DATA"
+    ],
+    "0150": [
+      "NO DATA"
+    ],
+    "0151": [
+      "83F11041510117"
+    ],
+    "0152": [
+      "NO DATA"
+    ],
+    "0153": [
+      "NO DATA"
+    ],
+    "0154": [
+      "NO DATA"
+    ],
+    "0155": [
+      "NO DATA"
+    ],
+    "0156": [
+      "NO DATA"
+    ],
+    "0157": [
+      "NO DATA"
+    ],
+    "0158": [
+      "NO DATA"
+    ],
+    "0159": [
+      "NO DATA"
+    ],
+    "015A": [
+      "NO DATA"
+    ],
+    "015B": [
+      "NO DATA"
+    ],
+    "015C": [
+      "NO DATA"
+    ],
+    "015D": [
+      "NO DATA"
+    ],
+    "015E": [
+      "NO DATA"
+    ],
+    "015F": [
+      "NO DATA"
+    ],
+    "0161": [
+      "NO DATA"
+    ],
+    "0162": [
+      "NO DATA"
+    ],
+    "0163": [
+      "NO DATA"
+    ],
+    "0164": [
+      "NO DATA"
+    ],
+    "0165": [
+      "84F110416504002F"
+    ],
+    "0166": [
+      "NO DATA"
+    ],
+    "0167": [
+      "NO DATA"
+    ],
+    "0168": [
+      "NO DATA"
+    ],
+    "0169": [
+      "NO DATA"
+    ],
+    "016A": [
+      "NO DATA"
+    ],
+    "016B": [
+      "NO DATA"
+    ],
+    "016C": [
+      "NO DATA"
+    ],
+    "016D": [
+      "NO DATA"
+    ],
+    "016E": [
+      "NO DATA"
+    ],
+    "016F": [
+      "NO DATA"
+    ],
+    "0170": [
+      "NO DATA"
+    ],
+    "0171": [
+      "NO DATA"
+    ],
+    "0172": [
+      "NO DATA"
+    ],
+    "0173": [
+      "NO DATA"
+    ],
+    "0174": [
+      "NO DATA"
+    ],
+    "0175": [
+      "NO DATA"
+    ],
+    "0176": [
+      "NO DATA"
+    ],
+    "0177": [
+      "NO DATA"
+    ],
+    "0178": [
+      "NO DATA"
+    ],
+    "0179": [
+      "NO DATA"
+    ],
+    "017A": [
+      "NO DATA"
+    ],
+    "017B": [
+      "NO DATA"
+    ],
+    "017C": [
+      "NO DATA"
+    ],
+    "017D": [
+      "NO DATA"
+    ],
+    "017E": [
+      "NO DATA"
+    ],
+    "017F": [
+      "NO DATA"
+    ],
+    "0181": [
+      "NO DATA"
+    ],
+    "0182": [
+      "NO DATA"
+    ],
+    "0183": [
+      "NO DATA"
+    ],
+    "0184": [
+      "NO DATA"
+    ],
+    "0185": [
+      "NO DATA"
+    ],
+    "0186": [
+      "NO DATA"
+    ],
+    "0187": [
+      "NO DATA"
+    ],
+    "0188": [
+      "NO DATA"
+    ],
+    "0189": [
+      "NO DATA"
+    ],
+    "018A": [
+      "NO DATA"
+    ],
+    "018B": [
+      "NO DATA"
+    ],
+    "018C": [
+      "NO DATA"
+    ],
+    "018D": [
+      "NO DATA"
+    ],
+    "018E": [
+      "NO DATA"
+    ],
+    "018F": [
+      "NO DATA"
+    ],
+    "0190": [
+      "NO DATA"
+    ],
+    "0191": [
+      "NO DATA"
+    ],
+    "0192": [
+      "NO DATA"
+    ],
+    "0193": [
+      "NO DATA"
+    ],
+    "0194": [
+      "NO DATA"
+    ],
+    "0195": [
+      "NO DATA"
+    ],
+    "0196": [
+      "NO DATA"
+    ],
+    "0197": [
+      "NO DATA"
+    ],
+    "0198": [
+      "NO DATA"
+    ],
+    "0199": [
+      "NO DATA"
+    ],
+    "019A": [
+      "NO DATA"
+    ],
+    "019B": [
+      "NO DATA"
+    ],
+    "019C": [
+      "NO DATA"
+    ],
+    "019D": [
+      "NO DATA"
+    ],
+    "019E": [
+      "NO DATA"
+    ],
+    "019F": [
+      "NO DATA"
+    ],
+    "01A1": [
+      "NO DATA"
+    ],
+    "01A2": [
+      "NO DATA"
+    ],
+    "01A3": [
+      "NO DATA"
+    ],
+    "01A4": [
+      "NO DATA"
+    ],
+    "01A5": [
+      "NO DATA"
+    ],
+    "01A6": [
+      "NO DATA"
+    ],
+    "01A7": [
+      "NO DATA"
+    ],
+    "01A8": [
+      "NO DATA"
+    ],
+    "01A9": [
+      "NO DATA"
+    ],
+    "01AA": [
+      "NO DATA"
+    ],
+    "01AB": [
+      "NO DATA"
+    ],
+    "01AC": [
+      "NO DATA"
+    ],
+    "01AD": [
+      "NO DATA"
+    ],
+    "01AE": [
+      "NO DATA"
+    ],
+    "01AF": [
+      "NO DATA"
+    ],
+    "01B0": [
+      "NO DATA"
+    ],
+    "01B1": [
+      "NO DATA"
+    ],
+    "01B2": [
+      "NO DATA"
+    ],
+    "01B3": [
+      "NO DATA"
+    ],
+    "01B4": [
+      "NO DATA"
+    ],
+    "01B5": [
+      "NO DATA"
+    ],
+    "01B6": [
+      "NO DATA"
+    ],
+    "01B7": [
+      "NO DATA"
+    ],
+    "01B8": [
+      "NO DATA"
+    ],
+    "01B9": [
+      "NO DATA"
+    ],
+    "01BA": [
+      "NO DATA"
+    ],
+    "01BB": [
+      "NO DATA"
+    ],
+    "01BC": [
+      "NO DATA"
+    ],
+    "01BD": [
+      "NO DATA"
+    ],
+    "01BE": [
+      "NO DATA"
+    ],
+    "01BF": [
+      "NO DATA"
+    ],
+    "01C1": [
+      "NO DATA"
+    ],
+    "01C2": [
+      "NO DATA"
+    ],
+    "01C3": [
+      "NO DATA"
+    ],
+    "01C4": [
+      "NO DATA"
+    ],
+    "01C5": [
+      "NO DATA"
+    ],
+    "01C6": [
+      "NO DATA"
+    ],
+    "01C7": [
+      "NO DATA"
+    ],
+    "01C8": [
+      "NO DATA"
+    ],
+    "01C9": [
+      "NO DATA"
+    ],
+    "01CA": [
+      "NO DATA"
+    ],
+    "01CB": [
+      "NO DATA"
+    ],
+    "01CC": [
+      "NO DATA"
+    ],
+    "01CD": [
+      "NO DATA"
+    ],
+    "01CE": [
+      "NO DATA"
+    ],
+    "01CF": [
+      "NO DATA"
+    ],
+    "01D0": [
+      "NO DATA"
+    ],
+    "01D1": [
+      "NO DATA"
+    ],
+    "01D2": [
+      "NO DATA"
+    ],
+    "01D3": [
+      "NO DATA"
+    ],
+    "01D4": [
+      "NO DATA"
+    ],
+    "01D5": [
+      "NO DATA"
+    ],
+    "01D6": [
+      "NO DATA"
+    ],
+    "01D7": [
+      "NO DATA"
+    ],
+    "01D8": [
+      "NO DATA"
+    ],
+    "01D9": [
+      "NO DATA"
+    ],
+    "01DA": [
+      "NO DATA"
+    ],
+    "01DB": [
+      "NO DATA"
+    ],
+    "01DC": [
+      "NO DATA"
+    ],
+    "01DD": [
+      "NO DATA"
+    ],
+    "01DE": [
+      "NO DATA"
+    ],
+    "01DF": [
+      "NO DATA"
+    ],
+    "01E1": [
+      "NO DATA"
+    ],
+    "01E2": [
+      "NO DATA"
+    ],
+    "01E3": [
+      "NO DATA"
+    ],
+    "01E4": [
+      "NO DATA"
+    ],
+    "01E5": [
+      "NO DATA"
+    ],
+    "01E6": [
+      "NO DATA"
+    ],
+    "01E7": [
+      "NO DATA"
+    ],
+    "01E8": [
+      "NO DATA"
+    ],
+    "01E9": [
+      "NO DATA"
+    ],
+    "01EA": [
+      "NO DATA"
+    ],
+    "01EB": [
+      "NO DATA"
+    ],
+    "01EC": [
+      "NO DATA"
+    ],
+    "01ED": [
+      "NO DATA"
+    ],
+    "01EE": [
+      "NO DATA"
+    ],
+    "01EF": [
+      "NO DATA"
+    ],
+    "01F0": [
+      "NO DATA"
+    ],
+    "01F1": [
+      "NO DATA"
+    ],
+    "01F2": [
+      "NO DATA"
+    ],
+    "01F3": [
+      "NO DATA"
+    ],
+    "01F4": [
+      "NO DATA"
+    ],
+    "01F5": [
+      "NO DATA"
+    ],
+    "01F6": [
+      "NO DATA"
+    ],
+    "01F7": [
+      "NO DATA"
+    ],
+    "01F8": [
+      "NO DATA"
+    ],
+    "01F9": [
+      "NO DATA"
+    ],
+    "01FA": [
+      "NO DATA"
+    ],
+    "01FB": [
+      "NO DATA"
+    ],
+    "01FC": [
+      "NO DATA"
+    ],
+    "01FD": [
+      "NO DATA"
+    ],
+    "01FE": [
+      "NO DATA"
+    ],
+    "01FF": [
+      "NO DATA"
+    ],
+    "03": [
+      "NO DATA"
+    ],
+    "03#2": [
+      "87F11043000000000000CB"
+    ],
+    "07": [
+      "87F11047000000000000CF"
+    ],
+    "0A": [
+      "NO DATA"
+    ],
+    "0A#2": [
+      "NO DATA"
+    ],
+    "0A#3": [
+      "NO DATA"
+    ],
+    "0900": [
+      "87F1104900013CC00001CF"
+    ],
+    "0903": [
+      "83F110490304D4"
+    ],
+    "0904": [
+      "87F1104904013031303299",
+      "87F11049040241323036B0",
+      "87F1104904033031000039",
+      "87F11049040400000000D9"
+    ],
+    "0905": [
+      "83F110490501D3"
+    ],
+    "0906": [
+      "NO DATA"
+    ],
+    "0906#2": [
+      "87F110490601AA42A9BE2B"
+    ],
+    "0909": [
+      "83F110490905DB"
+    ],
+    "090A": [
+      "87F110490A0145434D20D1",
+      "87F110490A022D456E6724",
+      "87F110490A03696E65435D",
+      "87F110490A046F6E7472A2"
+    ],
+    "0920": [
+      "87F11049200100000001F3"
+    ],
+    "220000": [
+      "NO DATA"
+    ],
+    "22F190": [
+      "NO DATA"
+    ],
+    "22F1A0": [
+      "NO DATA"
+    ],
+    "220100": [
+      "NO DATA"
+    ],
+    "220101": [
+      "NO DATA"
+    ],
+    "22F810": [
+      "NO DATA"
+    ]
+  }
+}

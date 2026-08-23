@@ -1,0 +1,539 @@
+{
+  "timestamp": "2026-08-23T14:16:11",
+  "vehicle": "Honda CB250R 2018 (MC52)",
+  "device": "6915D2D0-E7ED-1B8F-B87D-CEDDBF1FB1C3",
+  "protocol": "AUTO,",
+  "protocol_num": "A5",
+  "bitmaps": {
+    "00": "FE3EF011",
+    "20": "80040001",
+    "40": "C8008001",
+    "60": "08000001",
+    "80": "00000001",
+    "A0": "00000001",
+    "C0": "00000001",
+    "E0": "00000000"
+  },
+  "supported": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "0B",
+    "0C",
+    "0D",
+    "0E",
+    "0F",
+    "11",
+    "12",
+    "13",
+    "14",
+    "1C",
+    "20",
+    "21",
+    "2E",
+    "40",
+    "41",
+    "42",
+    "45",
+    "51",
+    "60",
+    "65",
+    "80",
+    "A0",
+    "C0",
+    "E0"
+  ],
+  "pids": [
+    {
+      "pid": "01",
+      "name": "Monitor status since DTCs cleared",
+      "raw": "00022000",
+      "value": null,
+      "unit": "",
+      "header": "86F110",
+      "responders": 1
+    },
+    {
+      "pid": "02",
+      "name": "Freeze DTC",
+      "raw": "0000",
+      "value": null,
+      "unit": "",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "03",
+      "name": "Fuel system status",
+      "raw": "0100",
+      "value": null,
+      "unit": "",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "04",
+      "name": "Calculated engine load",
+      "raw": "00",
+      "value": 0.0,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "05",
+      "name": "Engine coolant temperature",
+      "raw": "4B",
+      "value": 35,
+      "unit": "degC",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "06",
+      "name": "Short term fuel trim b1",
+      "raw": "80",
+      "value": 0.0,
+      "unit": "%",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "07",
+      "name": "Long term fuel trim b1",
+      "raw": "80",
+      "value": 0.0,
+      "unit": "%",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "0B",
+      "name": "Intake manifold absolute pressure",
+      "raw": "63",
+      "value": 99,
+      "unit": "kPa",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "0C",
+      "name": "Engine speed",
+      "raw": "0000",
+      "value": 0.0,
+      "unit": "rpm",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "0E",
+      "name": "Timing advance",
+      "raw": "80",
+      "value": 0.0,
+      "unit": "deg",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "0F",
+      "name": "Intake air temperature",
+      "raw": "4F",
+      "value": 39,
+      "unit": "degC",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "12",
+      "name": "Commanded secondary air status",
+      "raw": "01",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "13",
+      "name": "O2 sensors present (2 banks)",
+      "raw": "01",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "14",
+      "name": "O2 S1 voltage / STFT",
+      "raw": "FF80",
+      "value": 1.275,
+      "unit": "V",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "1C",
+      "name": "OBD standards conformance",
+      "raw": "28",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "21",
+      "name": "Distance with MIL on",
+      "raw": "0000",
+      "value": 0,
+      "unit": "km",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "2E",
+      "name": "Commanded evaporative purge",
+      "raw": "00",
+      "value": 0.0,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "41",
+      "name": "Monitor status this drive cycle",
+      "raw": "00222020",
+      "value": null,
+      "unit": "",
+      "header": "86F110",
+      "responders": 1
+    },
+    {
+      "pid": "42",
+      "name": "Control module voltage",
+      "raw": "2E18",
+      "value": 11.8,
+      "unit": "V",
+      "header": "84F110",
+      "responders": 1
+    },
+    {
+      "pid": "45",
+      "name": "Relative throttle position",
+      "raw": "00",
+      "value": 0.0,
+      "unit": "%",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "51",
+      "name": "Fuel type",
+      "raw": "01",
+      "value": null,
+      "unit": "",
+      "header": "83F110",
+      "responders": 1
+    },
+    {
+      "pid": "65",
+      "name": "?",
+      "raw": "04002F",
+      "value": null,
+      "unit": "",
+      "header": "84F110",
+      "responders": 1
+    }
+  ],
+  "undeclared": [],
+  "declared_no_response": [
+    "0D",
+    "11"
+  ],
+  "services": {
+    "dtc_stored": [
+      "87F11043000000000000CB"
+    ],
+    "dtc_pending": [
+      "87F11047000000000000CF"
+    ],
+    "dtc_permanent": [
+      "NO DATA"
+    ],
+    "mode09_supported": [
+      "87F1104900013CC00001CF"
+    ],
+    "mode09_supported_pids": [
+      "03",
+      "04",
+      "05",
+      "06",
+      "09",
+      "0A",
+      "20"
+    ],
+    "mode09_03": [
+      "83F110490304D4"
+    ],
+    "mode09_04": [
+      "87F1104904013031303299",
+      "87F11049040241323036B0",
+      "87F1104904033031000039",
+      "87F11049040400000000D9"
+    ],
+    "mode09_05": [
+      "83F110490501D3"
+    ],
+    "mode09_06": [
+      "87F110490601AA42A9BE2B"
+    ],
+    "mode09_09": [
+      "83F110490905DB"
+    ],
+    "mode09_0A": [
+      "87F110490A0145434D20D1",
+      "87F110490A022D456E6724",
+      "87F110490A03696E65435D",
+      "87F110490A046F6E7472A2"
+    ],
+    "mode09_20": [
+      "87F11049200100000001F3"
+    ],
+    "mode22_probe": {
+      "0000": [
+        "NO DATA"
+      ],
+      "F190": [
+        "NO DATA"
+      ],
+      "F1A0": [
+        "NO DATA"
+      ],
+      "0100": [
+        "NO DATA"
+      ],
+      "0101": [
+        "NO DATA"
+      ],
+      "F810": [
+        "NO DATA"
+      ]
+    }
+  },
+  "raw_log": {
+    "ATZ": [
+      "ELM327 v2.1"
+    ],
+    "ATE0": [
+      "OK"
+    ],
+    "ATL0": [
+      "OK"
+    ],
+    "ATS0": [
+      "OK"
+    ],
+    "ATAT1": [
+      "OK"
+    ],
+    "ATH1": [
+      "OK"
+    ],
+    "ATSP0": [
+      "OK"
+    ],
+    "0100": [
+      "OK",
+      "86F1104100FE3EF01105"
+    ],
+    "ATDP": [
+      "AUTO,",
+      "ISO 14230-4 (KWP FAST)"
+    ],
+    "ATDPN": [
+      "A5"
+    ],
+    "0100#1": [
+      "86F1104100FE3EF01105"
+    ],
+    "0120": [
+      "86F1104120800400016D"
+    ],
+    "0140": [
+      "86F1104140C800800151"
+    ],
+    "0160": [
+      "86F11041600800000131"
+    ],
+    "0180": [
+      "86F11041800000000149"
+    ],
+    "01A0": [
+      "86F11041A00000000169"
+    ],
+    "01C0": [
+      "86F11041C00000000189"
+    ],
+    "01E0": [
+      "86F11041E000000000A8"
+    ],
+    "0101": [
+      "86F110410100022000EB"
+    ],
+    "0102": [
+      "84F11041020000C8"
+    ],
+    "0103": [
+      "84F11041030100CA"
+    ],
+    "0104": [
+      "83F110410400C9"
+    ],
+    "0105": [
+      "83F11041054B15"
+    ],
+    "0106": [
+      "84F110410680004C"
+    ],
+    "0107": [
+      "84F110410780004D"
+    ],
+    "010B": [
+      "83F110410B6333"
+    ],
+    "010C": [
+      "NO DATA"
+    ],
+    "010C#2": [
+      "84F110410C0000D2"
+    ],
+    "010D": [
+      "NO DATA"
+    ],
+    "010D#2": [
+      "NO DATA"
+    ],
+    "010D#3": [
+      "NO DATA"
+    ],
+    "010E": [
+      "NO DATA"
+    ],
+    "010E#2": [
+      "83F110410E8053"
+    ],
+    "010F": [
+      "83F110410F4F23"
+    ],
+    "0111": [
+      "NO DATA"
+    ],
+    "0111#2": [
+      "NO DATA"
+    ],
+    "0111#3": [
+      "NO DATA"
+    ],
+    "0112": [
+      "83F110411201D8"
+    ],
+    "0113": [
+      "83F110411301D9"
+    ],
+    "0114": [
+      "NO DATA"
+    ],
+    "0114#2": [
+      "84F1104114FF8059"
+    ],
+    "011C": [
+      "83F110411C2809"
+    ],
+    "0121": [
+      "84F11041210000E7"
+    ],
+    "012E": [
+      "83F110412E00F3"
+    ],
+    "0141": [
+      "86F1104141002220206B"
+    ],
+    "0142": [
+      "84F11041422E184E"
+    ],
+    "0145": [
+      "83F1104145000A"
+    ],
+    "0151": [
+      "83F11041510117"
+    ],
+    "0165": [
+      "84F110416504002F"
+    ],
+    "03": [
+      "87F11043000000000000CB"
+    ],
+    "07": [
+      "87F11047000000000000CF"
+    ],
+    "0A": [
+      "NO DATA"
+    ],
+    "0A#2": [
+      "NO DATA"
+    ],
+    "0A#3": [
+      "NO DATA"
+    ],
+    "0900": [
+      "87F1104900013CC00001CF"
+    ],
+    "0903": [
+      "83F110490304D4"
+    ],
+    "0904": [
+      "87F1104904013031303299",
+      "87F11049040241323036B0",
+      "87F1104904033031000039",
+      "87F11049040400000000D9"
+    ],
+    "0905": [
+      "83F110490501D3"
+    ],
+    "0906": [
+      "87F110490601AA42A9BE2B"
+    ],
+    "0909": [
+      "83F110490905DB"
+    ],
+    "090A": [
+      "87F110490A0145434D20D1",
+      "87F110490A022D456E6724",
+      "87F110490A03696E65435D",
+      "87F110490A046F6E7472A2"
+    ],
+    "0920": [
+      "87F11049200100000001F3"
+    ],
+    "220000": [
+      "NO DATA"
+    ],
+    "22F190": [
+      "NO DATA"
+    ],
+    "22F1A0": [
+      "NO DATA"
+    ],
+    "220100": [
+      "NO DATA"
+    ],
+    "220101": [
+      "NO DATA"
+    ],
+    "22F810": [
+      "NO DATA"
+    ]
+  }
+}

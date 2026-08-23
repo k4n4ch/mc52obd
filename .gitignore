@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+work/
+.DS_Store
+
+# ── 位置情報を含むログは一切リポジトリに入れない ──────────────
+# スマホ GPS と連携して OSM 描画を行う際に生成されるログが対象。
+# 個人の移動履歴にあたるため、解析結果（比のクラスタ、閾値、統計）だけを
+# results/ に残し、生の軌跡は private/ に置いてここで弾く。
+private/*
+!private/README.md
+*.gpx
+*.kml
+*.kmz
+*.geojson
+*.nmea
+*.tcx
+*.fit
+
+# 位置情報列を含みうるスマホアプリのエクスポート（Car Scanner 等）
+private/*.csv
+*_gps.csv
+*_gps.json
