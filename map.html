@@ -438,7 +438,12 @@ function showTable() {
 
 // ── 更新 ─────────────────────────────────────────────────
 function refresh() {
-  assignGears(+$('k').value, +$('tol').value);
+  const k = +$('k').value, tol = +$('tol').value;
+  // 同一オリジンなので index.html（走行画面）と localStorage を共有する。
+  // ここで較正した値が、次回の走行画面にそのまま反映される。
+  if (isFinite(k) && k > 0) localStorage.setItem('mc52_k', k.toFixed(4));
+  if (isFinite(tol) && tol > 0) localStorage.setItem('mc52_tol', String(tol));
+  assignGears(k, tol);
   // 地図側の失敗でチャートを巻き込まない
   try { drawMap(); } catch (e) { console.warn('map:', e); }
   drawCharts();

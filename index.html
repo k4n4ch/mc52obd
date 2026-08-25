@@ -149,7 +149,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260823f';
+const VERSION = 'v20260826a';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -188,6 +188,43 @@ const PID = {
 
 // 現在値
 const V = {rpm:null, spd:null, thr:null, load:null, ect:null, volt:null, fuelsys:null};
+
+/* ── ギヤ判定 ──────────────────────────────────────────────
+ * 比 = k * R(n)。R(n) は諸元から出る理論比で、k はタイヤ外径・摩耗・
+ * 速度計の系統誤差をまとめて吸収する唯一の未知数。tools/gearcal.py と
+ * map.html と同じ方式。
+ *
+ * k と判定窓は localStorage 経由で map.html と共有する（同一オリジン）。
+ * map.html で実走ログから自動較正した値が、次回この画面に反映される。
+ *
+ * 既定値 k=1.000 は予測値。`0D` が ECU 内部の固定係数による生値なら
+ * 理論比と一致するはずで、実走で確かめる（詳細は FINDINGS.md）。
+ *
+ * ヒステリシスは入れていない。判定が合っているかを走りながら見るのが
+ * 目的なので、生の判定をそのまま出す。安定させるのは妥当性を確認した後。
+ * ────────────────────────────────────────────────────── */
+const GEAR_RATIO = {1:3.416, 2:2.250, 3:1.650, 4:1.350, 5:1.166, 6:1.038};
+const PRIMARY = 2.807, SECONDARY = 2.571;
+const TIRE_CIRC = Math.PI * (17 * 25.4 + 2 * 150 * 0.60) / 1000;   // 後輪 150/60R17 [m]
+const R = {};
+for (const n in GEAR_RATIO) R[n] = PRIMARY * GEAR_RATIO[n] * SECONDARY / (TIRE_CIRC * 60 / 1000);
+
+let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.000;
+let gearTol = parseFloat(localStorage.getItem('mc52_tol')) || 4.0;
+
+const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴れる
+
+/** 現在値からギヤを求める。判定できなければ null を返す。 */
+function currentGear() {
+  if (V.rpm === null || V.spd === null || V.rpm < 500 || V.spd < MIN_GEAR_SPEED) return null;
+  const ratio = V.rpm / V.spd;
+  let best = null, bd = Infinity;
+  for (const n in R) {
+    const d = Math.abs(ratio / (gearK * R[n]) - 1);
+    if (d < bd) { bd = d; best = +n; }
+  }
+  return bd <= gearTol / 100 ? best : null;
+}
 
 // ── ログ ──────────────────────────────────────────────────
 const logEl = document.getElementById('log');
@@ -581,13 +618,19 @@ function render() {
   cls('voltc', V.volt === null ? '' : (V.volt < 12.0 || V.volt > 15.2) ? 'bad'
              : (V.volt < 12.8 || V.volt > 14.9) ? 'warn' : '');
 
-  // ギヤ判定は未較正。比だけ出して、実走ログでクラスタが割れるかを確かめる段階。
-  // rpm/車速比が 6 個のクラスタに分離することを確認してから判定を入れる。
-  if (V.rpm !== null && V.spd !== null && V.spd >= 8) {
-    $('ratio').textContent = '比 ' + (V.rpm / V.spd).toFixed(1);
-  } else {
-    $('ratio').textContent = '比 --';
-  }
+  // ギヤ表示。判定できない理由を 2 つに書き分ける。
+  //   '–' … 低速すぎる/停車で比が定義できない
+  //   '?' … 比は出たがどの窓にも入らない（半クラ・シフト中・k がずれている）
+  const canRatio = V.rpm !== null && V.spd !== null && V.rpm >= 500 && V.spd >= MIN_GEAR_SPEED;
+  const g = currentGear();
+  const gv = $('gearv');
+  gv.textContent = g !== null ? g : (canRatio ? '?' : '–');
+  gv.classList.toggle('stale', g === null);
+
+  // 判定の妥当性を走りながら見るため、比と使用中の k を併記する
+  $('ratio').textContent = canRatio
+    ? '比 ' + (V.rpm / V.spd).toFixed(1) + ' / k ' + gearK.toFixed(3)
+    : 'k ' + gearK.toFixed(3);
 }
 
 function cls(id, c) {
