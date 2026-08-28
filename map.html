@@ -97,6 +97,8 @@ button:disabled{opacity:.35}
   <label>k <input type="number" id="k" step="0.001" value="1.013"></label>
   <label>窓± <input type="number" id="tol" step="0.5" value="4"></label>%
   <label title="回転数を車速の取得時刻へ補間して揃える"><input type="checkbox" id="align" checked> 時刻補正</label>
+  <label title="ECU は純正 14T/36T 前提で換算する。表示車速のみ補正し、ギヤ判定は生値で行う">丁数
+    <input type="number" id="sf" min="10" max="20" step="1" style="width:2.6rem">/<input type="number" id="sr" min="25" max="55" step="1" style="width:2.6rem"></label>
   <button id="fit" disabled>自動較正</button>
   <button id="tbl" disabled>表</button>
   <span id="stat">CSV を読み込む</span>
@@ -110,7 +112,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828f';
+const VERSION = 'v20260828g';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -143,6 +145,22 @@ const GEARS = [1,2,3,4,5,6];
 const GCOL = {1:'--g1',2:'--g2',3:'--g3',4:'--g4',5:'--g5',6:'--g6'};
 
 let isolate = null;   // null=全ギヤ表示、1-6=そのギヤだけ強調
+
+/* ── 表示車速のスプロケット補正 ────────────────────────────
+ * ビュワーが読むのは `speed_obd` = ECU の生値で、ECU は純正 14T/36T を固定
+ * 前提に換算している。丁数を変えると真の車速からずれる。
+ *   真の車速 = 0D × (前丁数 / 14) × (36 / 後丁数)
+ *
+ * **補正するのは表示だけ。** グラフ・カーソル値・線の太さの区分には掛けるが、
+ * **ギヤ判定には掛けない**。k は生値に対して定義されているため、補正した値で
+ * 比を取ると k ごとずれる（FINDINGS.md）。
+ *
+ * 設定は走行画面と localStorage を共有する（同一オリジン）。どちらで変えても
+ * 両方に効く。 */
+const STOCK_FRONT = 14, STOCK_REAR = 36;
+const sprkFront = () => parseInt($('sf').value, 10) || STOCK_FRONT;
+const sprkRear  = () => parseInt($('sr').value, 10) || STOCK_REAR;
+const speedCorr = () => (sprkFront() / STOCK_FRONT) * (STOCK_REAR / sprkRear());
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 const $ = id => document.getElementById(id);
@@ -243,10 +261,14 @@ const STOP_KMH = 1;      // これ以下を停車とみなす
 /** 時刻補正の切替を反映して比を計算し直す。k のフィットより先に呼ぶこと。 */
 function computeRatios() {
   const useAl = $('align').checked;
+  const c = speedCorr();
   for (const r of rows) {
     const rp = useAl && r.rpmAl != null ? r.rpmAl : r.rpmRaw;
     r.rpm = rp;
+    // 比は**生値**で取る。補正した値で取ると k ごとずれる
     r.ratio = (rp > 500 && r.spd >= 8) ? rp / r.spd : null;
+    // 表示・線の太さの区分は補正後（真の車速）
+    r.spdTrue = r.spd == null ? null : r.spd * c;
   }
 }
 
@@ -340,7 +362,7 @@ function fitK() {
 // ── 地図 ─────────────────────────────────────────────────
 const SPD_STEPS = [20, 40, 60, 80];        // 太さの区切り [km/h]
 const SPD_W = [2, 3, 4.5, 6, 7.5];         // 対応する線幅 [px]
-const spdClass = v => v == null ? 0 : SPD_STEPS.filter(s => v >= s).length;
+const spdClass = v => v == null ? 0 : SPD_STEPS.filter(s => v >= s).length;   // 補正後の車速で区分する
 
 function drawMap() {
   const pts = rows.filter(r => r.lat != null && r.lon != null);
@@ -375,10 +397,10 @@ function drawMap() {
   const runs = [];
   let cur = null;
   for (const p of pts) {
-    const key = (p.gear ?? p.gstate) + ':' + spdClass(p.spd);
+    const key = (p.gear ?? p.gstate) + ':' + spdClass(p.spdTrue);
     if (!cur || cur.key !== key) {
       if (cur) { cur.pts.push([p.lat, p.lon]); }   // 境界点を共有して線を繋ぐ
-      cur = {key, gear:p.gear, st:p.gstate, w:SPD_W[spdClass(p.spd)], pts:[[p.lat, p.lon]]};
+      cur = {key, gear:p.gear, st:p.gstate, w:SPD_W[spdClass(p.spdTrue)], pts:[[p.lat, p.lon]]};
       runs.push(cur);
     } else {
       cur.pts.push([p.lat, p.lon]);
@@ -452,7 +474,7 @@ function addLegend() {
 // 依存ゼロの自前描画。6 枚の小倍数（small multiples）で X 軸を共有する。
 // 各パネルは単一系列なので凡例は置かない（見出しが系列名を兼ねる）。
 const SERIES = [
-  {key:'spd',  name:'車速',   unit:'km/h', fix:0},
+  {key:'spdTrue', name:'車速', unit:'km/h', fix:0},   // 補正後（真の車速）
   // 目盛りが 1/6 に丸まる範囲にする（0 や 7 は実在しない段なので出さない）
   {key:'gear', name:'ギヤ',   unit:'',     fix:0, step:true, min:0.6, max:6.4},
   {key:'rpm',  name:'回転数', unit:'rpm',  fix:0},
@@ -657,7 +679,8 @@ function refresh() {
   const al = rows.length && rows[0].hasSkew ? 'skew列' : '周期推定';
   $('stat').textContent = `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
     + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`
-    + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)');
+    + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)')
+    + (speedCorr() !== 1 ? ` / 車速 ×${speedCorr().toFixed(4)}` : '');
 }
 
 $('file').onchange = e => {
@@ -684,6 +707,15 @@ $('fit').onclick = () => { computeRatios(); const k = fitK(); if (k) { $('k').va
 $('k').oninput = refresh;
 $('tol').oninput = refresh;
 // 補正を切り替えたら k も取り直す。比の系列そのものが変わるため
+$('sf').value = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
+$('sr').value = parseInt(localStorage.getItem('mc52_sr'), 10) || STOCK_REAR;
+const onSprk = () => {
+  localStorage.setItem('mc52_sf', String(sprkFront()));
+  localStorage.setItem('mc52_sr', String(sprkRear()));
+  refresh();   // 比は生値のままなので k の取り直しは不要
+};
+$('sf').oninput = onSprk; $('sr').oninput = onSprk;
+
 $('align').onchange = () => { computeRatios(); const k = fitK(); if (k) $('k').value = k.toFixed(4); refresh(); };
 $('tbl').onclick = showTable;
 addEventListener('resize', () => { drawCharts(); if (map) map.invalidateSize(); });
