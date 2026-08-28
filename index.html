@@ -94,8 +94,9 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
   font-size:.72rem; color:var(--dim)}
 #settings.open{display:flex}
 #settings label{display:flex; align-items:center; gap:.25rem}
-#settings input{font:inherit; width:2.8rem; background:#05070a; color:var(--fg);
-  border:1px solid var(--line); border-radius:.25rem; padding:.2rem .3rem; text-align:center}
+/* 丁数は任意値でなく選択にする。非現実的な値を入れられない */
+#settings select{font:inherit; background:#05070a; color:var(--fg);
+  border:1px solid var(--line); border-radius:.25rem; padding:.2rem .15rem}
 #settings .note{color:var(--mute); flex-basis:100%; line-height:1.4}
 #settings b{color:var(--fg)}
 
@@ -158,8 +159,8 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
   <button id="bLog">ログ</button>
 </div>
 <div id="settings">
-  <label>前スプロケ <input type="number" id="sfront" min="10" max="20" step="1"></label>丁
-  <label>後 <input type="number" id="srear" min="25" max="55" step="1"></label>丁
+  <label>前スプロケ <select id="sfront"></select></label>
+  <label>後 <select id="srear"></select></label>
   <span id="corr"></span>
   <span class="note"></span>
 </div>
@@ -167,7 +168,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260828d';
+const VERSION = 'v20260828e';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -247,6 +248,7 @@ let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.013;
  * 生値のままだから。詳細は FINDINGS.md）。
  * ────────────────────────────────────────────────────── */
 const STOCK_FRONT = 14, STOCK_REAR = 36;
+const FRONT_RANGE = [12, 18], REAR_RANGE = [28, 48];   // 市販の交換用がある範囲
 let sprkFront = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
 let sprkRear  = parseInt(localStorage.getItem('mc52_sr'), 10) || STOCK_REAR;
 const speedCorr = () => (sprkFront / STOCK_FRONT) * (STOCK_REAR / sprkRear);
@@ -917,8 +919,8 @@ $('bLog').onclick = () => {
 // ── 設定 ────────────────────────────────────────────────
 function applySprocket() {
   const f = parseInt($('sfront').value, 10), r = parseInt($('srear').value, 10);
-  if (f >= 10 && f <= 20) { sprkFront = f; localStorage.setItem('mc52_sf', String(f)); }
-  if (r >= 25 && r <= 55) { sprkRear = r; localStorage.setItem('mc52_sr', String(r)); }
+  if (f) { sprkFront = f; localStorage.setItem('mc52_sf', String(f)); }
+  if (r) { sprkRear = r; localStorage.setItem('mc52_sr', String(r)); }
   const c = speedCorr();
   $('corr').innerHTML = '表示車速 <b>×' + c.toFixed(4) + '</b>';
   $('settings').querySelector('.note').textContent =
@@ -927,8 +929,18 @@ function applySprocket() {
               + '丁数を変えると 0D が真の車速からずれる。表示のみ補正し、ログには生値を記録する。';
   render();
 }
-$('sfront').value = sprkFront; $('srear').value = sprkRear;
-$('sfront').oninput = applySprocket; $('srear').oninput = applySprocket;
+function fillTeeth(el, range, stock, saved) {
+  el.innerHTML = '';
+  for (let n = range[0]; n <= range[1]; n++) {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n + (n === stock ? 'T(純正)' : 'T');
+    el.appendChild(o);
+  }
+  el.value = saved;
+}
+fillTeeth($('sfront'), FRONT_RANGE, STOCK_FRONT, sprkFront);
+fillTeeth($('srear'), REAR_RANGE, STOCK_REAR, sprkRear);
+$('sfront').onchange = applySprocket; $('srear').onchange = applySprocket;
 applySprocket();
 
 $('ver').textContent = VERSION;
