@@ -93,6 +93,7 @@ button:disabled{opacity:.35}
   <input type="file" id="file" accept=".csv,text/csv">
   <label>k <input type="number" id="k" step="0.001" value="1.013"></label>
   <label>窓± <input type="number" id="tol" step="0.5" value="4"></label>%
+  <label title="回転数を車速の取得時刻へ補間して揃える"><input type="checkbox" id="align" checked> 時刻補正</label>
   <button id="fit" disabled>自動較正</button>
   <button id="tbl" disabled>表</button>
   <span id="stat">CSV を読み込む</span>
@@ -106,7 +107,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828c';
+const VERSION = 'v20260828d';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -149,7 +150,7 @@ let cursor = -1;
 // アプリ形式（rpm,speed_obd,…,lat,lon）と Mac 側 logger.py 形式
 // （0C_rpm,0D_speed,…）の双方を受ける。後者に GPS は無いので地図は出ない。
 const COLS = {
-  t:['t_sec'], rpm:['rpm','0C_rpm'], spd:['speed_obd','0D_speed'],
+  t:['t_sec'], rpm:['rpm','0C_rpm'], spd:['speed_obd','0D_speed'], skew:['skew_ms'],
   thr:['throttle','11_tps'], ect:['ect','05_ect'], volt:['volt','42_volt'],
   lat:['lat'], lon:['lon'], gspd:['speed_gps'],
 };
@@ -173,11 +174,59 @@ function parseCsv(text) {
       t: num(a, pick.t) ?? i, rpm: num(a, pick.rpm), spd: num(a, pick.spd),
       thr: num(a, pick.thr), ect: num(a, pick.ect), volt: num(a, pick.volt),
       lat: num(a, pick.lat), lon: num(a, pick.lon), gspd: num(a, pick.gspd),
+      skew: num(a, pick.skew),
     };
-    r.ratio = (r.rpm > 500 && r.spd >= 8) ? r.rpm / r.spd : null;
     out.push(r);
   }
+  alignRpm(out);
   return out;
+}
+
+/* ── 回転数を車速の取得時刻へ合わせる ──────────────────────
+ * rpm と車速は別リクエストなので取得時刻がずれる。加速中は比が過大に、
+ * 減速中は過小になり、**符号が加減速で反転する**（実測: 加速 +7.3% /
+ * 減速 -5.8%、FINDINGS.md）。エンブレ中の判定失敗の主因がこれ。
+ *
+ * 新旧でズレの符号が逆になる点に注意。
+ *   旧（〜v20260828c）… 行は 0x0C の応答時に書かれ、車速は約 1 周期前。
+ *                        **回転数のほうが新しい**。skew_ms 列は無い
+ *   新（v20260828d〜） … 行は 0x0D の応答時。回転数は skew_ms だけ古い
+ *
+ * どちらも「回転数の時系列を、車速の取得時刻で線形補間して読み直す」で
+ * 揃う。旧ログのズレは中央周期で近似する（実測でこの補正により判定失敗が
+ * 43%→29% / 34%→20% に下がることを確認済み）。 */
+function alignRpm(rows) {
+  const dt = [];
+  for (let i = 1; i < rows.length; i++) {
+    const d = rows[i].t - rows[i-1].t;
+    if (d > 0 && d < 5) dt.push(d);
+  }
+  dt.sort((a,b) => a-b);
+  const cyc = dt.length ? dt[dt.length >> 1] : 0.5;
+  const hasSkew = rows.some(r => r.skew != null);
+
+  // 回転数サンプルの時刻と、揃えたい先（車速の取得時刻）
+  const tr = rows.map(r => hasSkew ? r.t - (r.skew || 0) / 1000 : r.t);
+  const ts = rows.map(r => hasSkew ? r.t : r.t - cyc);
+
+  let j = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    r.rpmRaw = r.rpm;
+    if (r.rpm == null) { r.rpmAl = null; continue; }
+    const want = ts[i];
+    while (j < rows.length - 1 && tr[j+1] <= want) j++;
+    let k = j;
+    while (k > 0 && tr[k] > want) k--;
+    const a = rows[k], b = rows[Math.min(k+1, rows.length-1)];
+    if (a.rpm == null || b.rpm == null || tr[k+1] == null || tr[k+1] <= tr[k]) {
+      r.rpmAl = r.rpm;
+    } else {
+      const f = Math.max(0, Math.min(1, (want - tr[k]) / (tr[k+1] - tr[k])));
+      r.rpmAl = a.rpm + (b.rpm - a.rpm) * f;
+    }
+  }
+  rows.forEach(r => { r.aligned = cyc; r.hasSkew = hasSkew; });
 }
 
 // ── ギヤ判定 ──────────────────────────────────────────────
@@ -188,8 +237,19 @@ function parseCsv(text) {
 //   'slow' … 低速すぎて比が定義できない（分母が小さく暴れる）
 //   'unk'  … 比は出たがどの窓にも入らない＝半クラ・シフト中・k のずれ
 const STOP_KMH = 1;      // これ以下を停車とみなす
+/** 時刻補正の切替を反映して比を計算し直す。k のフィットより先に呼ぶこと。 */
+function computeRatios() {
+  const useAl = $('align').checked;
+  for (const r of rows) {
+    const rp = useAl && r.rpmAl != null ? r.rpmAl : r.rpmRaw;
+    r.rpm = rp;
+    r.ratio = (rp > 500 && r.spd >= 8) ? rp / r.spd : null;
+  }
+}
+
 function assignGears(k, tolPct) {
   const tol = tolPct / 100;
+  computeRatios();
   for (const r of rows) {
     r.gear = null;
     r.gstate = r.spd == null ? 'slow'
@@ -549,8 +609,10 @@ function refresh() {
   const known = rows.filter(r => r.gear).length;
   const rat = rows.filter(r => r.ratio != null).length;
   const dur = n ? (rows[n-1].t - rows[0].t) : 0;
+  const al = rows.length && rows[0].hasSkew ? 'skew列' : '周期推定';
   $('stat').textContent = `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
-    + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`;
+    + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`
+    + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)');
 }
 
 $('file').onchange = e => {
@@ -561,6 +623,7 @@ $('file').onchange = e => {
     try {
       rows = parseCsv(rd.result);
       drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
+      computeRatios();           // fitK は比を見るので先に用意する
       $('fit').disabled = false; $('tbl').disabled = false;
       const k = fitK();
       if (k) $('k').value = k.toFixed(4);
@@ -572,9 +635,11 @@ $('file').onchange = e => {
   };
   rd.readAsText(f);
 };
-$('fit').onclick = () => { const k = fitK(); if (k) { $('k').value = k.toFixed(4); refresh(); } };
+$('fit').onclick = () => { computeRatios(); const k = fitK(); if (k) { $('k').value = k.toFixed(4); refresh(); } };
 $('k').oninput = refresh;
 $('tol').oninput = refresh;
+// 補正を切り替えたら k も取り直す。比の系列そのものが変わるため
+$('align').onchange = () => { computeRatios(); const k = fitK(); if (k) $('k').value = k.toFixed(4); refresh(); };
 $('tbl').onclick = showTable;
 addEventListener('resize', () => { drawCharts(); if (map) map.invalidateSize(); });
 </script>
