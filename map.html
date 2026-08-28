@@ -73,6 +73,10 @@ button:disabled{opacity:.35}
 .legend .row{display:flex; align-items:center; gap:.28rem; flex-wrap:wrap}
 .legend .sw{width:1.15rem; height:.42rem; border-radius:999px;
             outline:1.5px solid var(--casing); outline-offset:0}
+.legend .gsel{display:inline-flex; align-items:center; gap:.15rem; cursor:pointer;
+  padding:.1rem .2rem; border-radius:.2rem; border:1px solid transparent}
+.legend .gsel:hover{background:rgba(0,0,0,.06)}
+.legend .gsel.on{background:#0b0b0b; color:#fff; border-color:#0b0b0b}
 .legend .wd{display:flex; align-items:center; gap:.3rem; margin-top:.3rem}
 .legend .wd i{display:block; background:#52514e; border-radius:999px}
 
@@ -98,7 +102,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260823a';
+const VERSION = 'v20260828b';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -129,6 +133,15 @@ for (const n in GEAR) R[n] = PRIMARY * GEAR[n] * SECONDARY / (TIRE_CIRC * 60 / 1
 const GEARS = [1,2,3,4,5,6];
 
 const GCOL = {1:'--g1',2:'--g2',3:'--g3',4:'--g4',5:'--g5',6:'--g6'};
+
+/* 色相を増やさずに識別性を上げるための第 2 チャネル。
+ * ギヤは順序尺度なのでカテゴリカル 6 色は全ペア検証を通らない（4 番目の枠で
+ * 黄と橙が通常視 ΔE 13.7 と floor を割る）。単一色相の順序ランプは validator を
+ * 通るが、実データでは青系が並んで判別しづらい。そこで**破線パターン**を足す。
+ * 低いギヤほど細かく切れるので、順序そのものも補強する。*/
+const GDASH = {1:'2,7', 2:'5,6', 3:'10,6', 4:'18,6', 5:'32,7', 6:null};
+
+let isolate = null;   // null=全ギヤ表示、1-6=そのギヤだけ強調
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 const $ = id => document.getElementById(id);
@@ -171,19 +184,46 @@ function parseCsv(text) {
 }
 
 // ── ギヤ判定 ──────────────────────────────────────────────
-// 比 = k * R(n)。最も近いギヤへ割り当て、窓の外は不確定(null)。
+// 比 = k * R(n)。最も近いギヤへ割り当てる。
+//
+// 判定できない場合を**意味で 3 つに分ける**。混ぜると読み違える。
+//   'stop' … 車速ゼロ。判定できないのではなく、判定する対象が無い
+//   'slow' … 低速すぎて比が定義できない（分母が小さく暴れる）
+//   'unk'  … 比は出たがどの窓にも入らない＝半クラ・シフト中・k のずれ
+const STOP_KMH = 1;      // これ以下を停車とみなす
 function assignGears(k, tolPct) {
   const tol = tolPct / 100;
   for (const r of rows) {
     r.gear = null;
+    r.gstate = r.spd == null ? 'slow'
+             : r.spd <= STOP_KMH ? 'stop'
+             : r.ratio == null ? 'slow' : 'unk';
     if (r.ratio == null) continue;
     let best = null, bd = Infinity;
     for (const n of GEARS) {
       const d = Math.abs(r.ratio / (k * R[n]) - 1);
       if (d < bd) { bd = d; best = n; }
     }
-    if (bd <= tol) r.gear = best;
+    if (bd <= tol) { r.gear = best; r.gstate = 'gear'; }
   }
+}
+
+/** 連続した停車点をひとまとめにし、位置と停車時間を返す。 */
+function stopRuns(minSec) {
+  const out = [];
+  let cur = null;
+  for (const r of rows) {
+    if (r.gstate === 'stop' && r.lat != null) {
+      if (!cur) cur = {t0: r.t, t1: r.t, lat: r.lat, lon: r.lon, n: 1};
+      else { cur.t1 = r.t; cur.lat += r.lat; cur.lon += r.lon; cur.n++; }
+    } else if (cur) {
+      if (cur.t1 - cur.t0 >= minSec) out.push(cur);
+      cur = null;
+    }
+  }
+  if (cur && cur.t1 - cur.t0 >= minSec) out.push(cur);
+  for (const s of out) { s.lat /= s.n; s.lon /= s.n; s.sec = s.t1 - s.t0; }
+  return out;
 }
 
 /**
@@ -249,10 +289,10 @@ function drawMap() {
   const runs = [];
   let cur = null;
   for (const p of pts) {
-    const key = (p.gear ?? 0) + ':' + spdClass(p.spd);
+    const key = (p.gear ?? p.gstate) + ':' + spdClass(p.spd);
     if (!cur || cur.key !== key) {
       if (cur) { cur.pts.push([p.lat, p.lon]); }   // 境界点を共有して線を繋ぐ
-      cur = {key, gear:p.gear, w:SPD_W[spdClass(p.spd)], pts:[[p.lat, p.lon]]};
+      cur = {key, gear:p.gear, st:p.gstate, w:SPD_W[spdClass(p.spd)], pts:[[p.lat, p.lon]]};
       runs.push(cur);
     } else {
       cur.pts.push([p.lat, p.lon]);
@@ -261,14 +301,35 @@ function drawMap() {
   const casing = css('--casing');
   for (const run of runs) {
     if (run.pts.length < 2) continue;
+    // 1 ギヤだけ抜き出しているときは、他を薄く落として背景として残す
+    const dim = isolate !== null && run.gear !== isolate;
+    // 停車区間は線を引かない（動いていないので線に意味が無い）。マーカーで示す
+    if (run.st === 'stop') continue;
+    const dash = run.gear ? GDASH[run.gear] : (run.st === 'slow' ? '1,4' : '3,4');
     // ケーシングを先に敷く。下地(OSMタイル)とのコントラストはこれで担保する
-    L.polyline(run.pts, {color:casing, weight:run.w + 3, opacity:.9,
+    L.polyline(run.pts, {color:casing, weight:run.w + 3, opacity: dim ? .12 : .9,
       lineCap:'round', lineJoin:'round', interactive:false}).addTo(layer);
     L.polyline(run.pts, {color: run.gear ? css(GCOL[run.gear]) : css('--gx'),
-      weight:run.w, opacity:1, lineCap:'round', lineJoin:'round', interactive:false}).addTo(layer);
+      weight:run.w, opacity: dim ? .18 : 1, dashArray: dash,
+      lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(layer);
   }
+  // 停車地点。滞在時間で大きさを変える。信号待ちと休憩が一目で分かる
+  for (const s of stopRuns(3)) {
+    const rad = Math.min(11, 4 + Math.log2(s.sec));
+    L.circleMarker([s.lat, s.lon], {
+      radius: rad, color: css('--casing'), weight: 2,
+      fillColor: '#fcfcfb', fillOpacity: isolate !== null ? .25 : .95,
+      opacity: isolate !== null ? .25 : 1,
+    }).bindTooltip('停車 ' + (s.sec >= 60 ? (s.sec/60).toFixed(1) + '分' : s.sec.toFixed(0) + '秒'))
+      .addTo(layer);
+  }
+
   marker.addTo(layer);
-  map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])), {padding:[24,24]});
+  // 抜き出しの切り替えで視点が戻らないよう、最初の描画時だけ範囲を合わせる
+  if (!drawMap._fitted) {
+    map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])), {padding:[24,24]});
+    drawMap._fitted = true;
+  }
 }
 
 function addLegend() {
@@ -276,16 +337,33 @@ function addLegend() {
   legend.onAdd = () => {
     const d = L.DomUtil.create('div', 'leaflet-control legend');
     let sw = '';
-    // 色だけに頼らないよう、各段に数字を添える
-    for (const n of GEARS) sw += `<span class="sw" style="background:${css(GCOL[n])}"></span><span>${n}</span>`;
+    // 色だけに頼らないよう、各段に数字と破線パターンを添える。タップで抜き出し
+    for (const n of GEARS) {
+      const d = GDASH[n] ? ` stroke-dasharray="${GDASH[n]}"` : '';
+      sw += `<span class="gsel${isolate === n ? ' on' : ''}" data-g="${n}">`
+          + `<svg width="26" height="8" viewBox="0 0 26 8"><line x1="0" y1="4" x2="26" y2="4"`
+          + ` stroke="${css(GCOL[n])}" stroke-width="5"${d}/></svg>${n}</span>`;
+    }
     let wd = '';
     const lbl = ['〜20','〜40','〜60','〜80','80〜'];
     for (let i = 0; i < SPD_W.length; i++)
       wd += `<i style="width:1.1rem;height:${SPD_W[i]}px"></i><span>${lbl[i]}</span>`;
     d.innerHTML = `<b>ギヤ（線の色）</b><div class="row">${sw}
-      <span class="sw" style="background:${css('--gx')}"></span><span>不明</span></div>
+      </div>
+      <div class="row" style="margin-top:.25rem">
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="3,4"/></svg><span>半クラ・シフト</span>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="1,4"/></svg><span>低速</span>
+      <svg width="16" height="14"><circle cx="8" cy="7" r="5" fill="#fcfcfb" stroke="${css('--casing')}" stroke-width="2"/></svg><span>停車</span></div>
       <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
     L.DomEvent.disableClickPropagation(d);
+    d.querySelectorAll('.gsel').forEach(el => {
+      el.onclick = () => {
+        const g = +el.dataset.g;
+        isolate = (isolate === g) ? null : g;   // 同じものを再度押すと全表示へ戻る
+        legend.remove(); addLegend();
+        drawMap();
+      };
+    });
     return d;
   };
   legend.addTo(map);
@@ -463,6 +541,7 @@ $('file').onchange = e => {
   rd.onload = () => {
     try {
       rows = parseCsv(rd.result);
+      drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
       $('fit').disabled = false; $('tbl').disabled = false;
       const k = fitK();
       if (k) $('k').value = k.toFixed(4);
