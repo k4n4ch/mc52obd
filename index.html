@@ -35,7 +35,8 @@ body{
 .chip.rec .dot{background:var(--bad); animation:blink 1s steps(1,end) infinite}
 @keyframes blink{50%{opacity:.15}}
 #ver{margin-left:auto; color:#5b6472; font-size:.66rem; letter-spacing:.04em; white-space:nowrap}
-#hz{margin-left:.55rem; color:var(--dim); white-space:nowrap}
+#hz{margin-left:.55rem; color:var(--dim); white-space:nowrap;
+    cursor:pointer; padding:.2rem .3rem; margin-right:-.3rem}
 
 /* 誤ったドングルへの接続を知らせる帯。ログは畳んであるので見落とす */
 #alert{flex:0 0 auto; display:none; padding:.5rem .7rem; font-size:.8rem; line-height:1.4;
@@ -149,7 +150,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260828a';
+const VERSION = 'v20260828b';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -533,7 +534,24 @@ function handlePid(pid, block) {
 }
 
 // ── ポーリング ────────────────────────────────────────────
-// レスポンス駆動: '>' を受けたら即次を送る。タイマー駆動より詰められる。
+// レスポンス駆動: '>' を受けたら次を送る。タイマー駆動より詰められる。
+//
+// ただし**即座には撃たない**。ISO 14230 は応答終了から次の要求まで
+// P3min ≒ 55ms を要求しており、待たずに撃つと ECU に無視され、ELM327 が
+// ST タイムアウトして NO DATA を返す。
+//
+// 実測（2026-08-28 の 2 走行、1308 行 / 631 行）で判明した根拠:
+//   ・ポーリング自体は設計どおり 1.92 Hz で回っていた
+//   ・にもかかわらず記録は 1.01 Hz。行は 0x0C の成功時にしか書かないため
+//   ・0x0C の脱落率 36〜38%。回転数帯・車速帯を問わず平坦（停車中も 38%）で、
+//     バースト性も無い（451 連中 435 が 1 回のみ）→ 無線でも運転状態でもない
+//   ・脱落サイクルの超過時間 +170ms が ATST(80ms)＋BLE 往復と一致
+// つまり ECU が要求を無視している形。待ちを入れて検証する。
+//
+// 最適値はログから詰めるため localStorage で調整可能にしてある。
+let p3Delay = parseInt(localStorage.getItem('mc52_p3'), 10);
+if (!isFinite(p3Delay) || p3Delay < 0 || p3Delay > 500) p3Delay = 55;
+
 let polling = false, cycle = 0, fastIdx = 0;
 let hits = 0, misses = 0, rateT0 = 0, rateN = 0;
 let watchdog = null;
@@ -557,10 +575,12 @@ function startPolling() {
       sendNextPid();
     }
     const dt = (performance.now() - rateT0) / 1000;
-    if (dt >= 2) {
-      document.getElementById('hz').textContent =
-        (rateN / dt).toFixed(1) + ' Hz' + (misses ? '  欠測' + misses : '');
-      rateT0 = performance.now(); rateN = 0;
+    if (dt >= 3) {
+      // 直近の窓だけを見る。欠測は累積ではなく率で出す（ログ解析側と揃える）
+      const req = rateN * (FAST.length + 1);
+      const pct = req ? Math.round(misses / (req + misses) * 100) : 0;
+      $('hz').textContent = (rateN / dt).toFixed(1) + 'Hz 欠' + pct + '% P' + p3Delay;
+      rateT0 = performance.now(); rateN = 0; misses = 0;
     }
   }, 700);
 }
@@ -583,9 +603,12 @@ function sendNextPid() {
     rateN++;   // 1 周 = 1 サンプル
   }
   awaiting = pid;
-  sendRaw('01' + pid.toString(16).padStart(2, '0').toUpperCase()).catch(e => {
-    log('送信失敗: ' + e.message, 'e');
-  });
+  const cmd = '01' + pid.toString(16).padStart(2, '0').toUpperCase();
+  setTimeout(() => {
+    // 待っている間に監視タイマが先へ進めていたら、この要求は撃たない
+    if (!polling || !connected || awaiting !== pid) return;
+    sendRaw(cmd).catch(e => log('送信失敗: ' + e.message, 'e'));
+  }, p3Delay);
 }
 
 // ══ 表示 ═════════════════════════════════════════════════
@@ -803,6 +826,16 @@ $('bGps').onclick = () => {
   if (gpsEnabled) startGps(); else stopGps();
 };
 $('alert').onclick = clearAlert;   // タップで消す
+
+// 要求前の待ち時間をその場で振れるようにする。1 回の走行で複数の値を試して
+// 欠測率の変化を見るため。P3min 説の検証が目的なので 55ms を挟んである。
+const P3_STEPS = [0, 30, 55, 80, 110];
+$('hz').onclick = () => {
+  p3Delay = P3_STEPS[(P3_STEPS.indexOf(p3Delay) + 1) % P3_STEPS.length];
+  localStorage.setItem('mc52_p3', String(p3Delay));
+  log('要求前の待ち: ' + p3Delay + 'ms', 'w');
+  rateT0 = performance.now(); rateN = 0; misses = 0;   // 窓をやり直す
+};
 $('bLog').onclick = () => {
   logEl.classList.toggle('open');
   setBtn('bLog', logEl.classList.contains('open'));
