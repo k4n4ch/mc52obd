@@ -100,6 +100,7 @@ button:disabled{opacity:.35}
   <label title="ECU は純正 14T/36T 前提で換算する。表示車速のみ補正し、ギヤ判定は生値で行う">丁数
     <input type="number" id="sf" min="10" max="20" step="1" style="width:2.6rem">/<input type="number" id="sr" min="25" max="55" step="1" style="width:2.6rem"></label>
   <button id="fit" disabled>自動較正</button>
+  <button id="estsp" disabled title="GPS 速度との一致から前丁数を推定する。後丁数は実車の値を入れておくこと">前丁数推定</button>
   <button id="tbl" disabled>表</button>
   <span id="stat">CSV を読み込む</span>
 </div>
@@ -112,7 +113,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828g';
+const VERSION = 'v20260828h';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -161,6 +162,35 @@ const STOCK_FRONT = 14, STOCK_REAR = 36;
 const sprkFront = () => parseInt($('sf').value, 10) || STOCK_FRONT;
 const sprkRear  = () => parseInt($('sr').value, 10) || STOCK_REAR;
 const speedCorr = () => (sprkFront() / STOCK_FRONT) * (STOCK_REAR / sprkRear());
+
+/**
+ * GPS 速度との一致から前スプロケット丁数を推定する。
+ *
+ *   補正係数 c = Σ(GPS) / Σ(0D)   … 和の比で取る（各点の比を平均すると
+ *                                    分母のノイズで上振れする）
+ *   c = (前 / 14) × (36 / 後)  より  前 = 14 × c × 後 / 36
+ *
+ * GPS は低速域で相対誤差が大きく比が発散するので 20km/h 以上だけを使う。
+ *
+ * **推定できるのは前丁数だけで、後丁数は実車の値が入っている前提。** 速度比から
+ * (前, 後) の組を一意に決めることはできない。例えば 18/43 と 15/36 は比が 0.4%
+ * しか違わず区別できない。誤差の検査で弾けるのは、指定された後丁数と辻褄が
+ * 合わない組み合わせ（例: 後 39T なら 1.6% ずれる）まで。
+ */
+function estimateFront() {
+  const sel = rows.filter(r => r.gspd != null && r.gspd > 20 && r.spd != null && r.spd > 0);
+  if (sel.length < 30) return null;
+  const c = sel.reduce((a, r) => a + r.gspd, 0) / sel.reduce((a, r) => a + r.spd, 0);
+  const exact = STOCK_FRONT * c * sprkRear() / STOCK_REAR;
+  const front = Math.round(exact);
+  // 丁数の丸め残差では判定力が足りない。**丸めた組み合わせが実測の補正係数を
+  // どれだけ再現するか**を見る。例えば後 39T と誤設定すると 16T へ丸まって
+  // 残差は 0.26 と小さいが、係数は 1.6% ずれる。
+  const cPair = (front / STOCK_FRONT) * (STOCK_REAR / sprkRear());
+  const err = cPair / c - 1;
+  return {c, exact, front, n: sel.length, err,
+          ok: front >= 10 && front <= 20 && Math.abs(err) <= 0.01};
+}
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 const $ = id => document.getElementById(id);
@@ -692,6 +722,9 @@ $('file').onchange = e => {
       rows = parseCsv(rd.result);
       drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
       computeRatios();           // fitK は比を見るので先に用意する
+      $('estsp').disabled = false;
+      // 一度も設定していなければ自動で入れる。設定済みなら勝手に上書きしない
+      if (localStorage.getItem('mc52_sf') == null) applyEstimate(true);
       $('fit').disabled = false; $('tbl').disabled = false;
       const k = fitK();
       if (k) $('k').value = k.toFixed(4);
@@ -715,6 +748,22 @@ const onSprk = () => {
   refresh();   // 比は生値のままなので k の取り直しは不要
 };
 $('sf').oninput = onSprk; $('sr').oninput = onSprk;
+
+function applyEstimate(quiet) {
+  const e = estimateFront();
+  if (!e) { if (!quiet) $('stat').textContent = 'GPS 速度が足りず丁数を推定できない'; return; }
+  const msg = `前丁数 推定 ${e.exact.toFixed(2)} → ${e.front}T`
+            + `（実測係数 ${e.c.toFixed(4)} / 誤差 ${(e.err * 100).toFixed(2)}% / GPS ${e.n} 点）`;
+  if (e.ok) {
+    $('sf').value = e.front;
+    onSprk();
+    $('stat').textContent = msg;
+  } else {
+    // 丸め残差が大きい＝後丁数の設定が実車と違う可能性。黙って丸めない
+    $('stat').textContent = msg + ' — 誤差が大きい。後丁数の設定が実車と違う可能性';
+  }
+}
+$('estsp').onclick = () => applyEstimate(false);
 
 $('align').onchange = () => { computeRatios(); const k = fitK(); if (k) $('k').value = k.toFixed(4); refresh(); };
 $('tbl').onclick = showTable;
