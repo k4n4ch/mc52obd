@@ -65,7 +65,10 @@ button:disabled{opacity:.35}
 .chart h3{font-size:.68rem; font-weight:600; color:var(--dim); letter-spacing:.08em;
           display:flex; justify-content:space-between; align-items:baseline}
 .chart h3 span{color:var(--fg); font-size:.82rem; font-weight:700}
-.chart canvas{width:100%; height:74px; display:block; touch-action:none}
+/* 縦方向のスクロールはブラウザに渡し、横方向のドラッグだけをスクラブに使う。
+ * touch-action:none にすると縦スクロールまで奪われ、6 枚を積んだ側が
+ * 事実上スクロールできなくなる。 */
+.chart canvas{width:100%; height:74px; display:block; touch-action:pan-y}
 
 /* ── 凡例（地図の上。ギヤは色だけに頼らないよう数字も入れる） ── */
 .leaflet-control.legend{
@@ -107,7 +110,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828d';
+const VERSION = 'v20260828e';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -543,10 +546,15 @@ function drawChart(s) {
 // ── 連動カーソル ─────────────────────────────────────────
 // チャートをなぞると、その時刻の値が見出しに出て地図上の位置も動く。
 function bindCursor(cv) {
-  const move = e => {
+  // タッチでは「横に動かす意図」が確認できるまでスクラブを始めない。
+  // 縦に動かしているならブラウザにスクロールさせる（touch-action:pan-y）。
+  let start = null, locked = false;
+  const LOCK_PX = 8;
+
+  const scrub = e => {
     if (!rows.length) return;
     const rect = cv.getBoundingClientRect();
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const cx = e.clientX - rect.left;
     const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
     const t = t0 + (t1 - t0) * Math.max(0, Math.min(1, (cx - 30) / (rect.width - 36)));
     let bi = 0, bd = Infinity;
@@ -555,11 +563,33 @@ function bindCursor(cv) {
       if (d < bd) { bd = d; bi = i; }
     }
     setCursor(bi);
-    e.preventDefault();
   };
-  cv.addEventListener('pointermove', move);
-  cv.addEventListener('pointerdown', move);
-  cv.addEventListener('pointerleave', () => setCursor(-1));
+
+  cv.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') { start = {x: e.clientX, y: e.clientY}; locked = false; }
+    else { locked = true; scrub(e); }
+  });
+
+  cv.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'touch') { scrub(e); return; }
+    if (!start) return;
+    if (!locked) {
+      const dx = Math.abs(e.clientX - start.x), dy = Math.abs(e.clientY - start.y);
+      if (dy > dx && dy > LOCK_PX) { start = null; return; }   // 縦。スクロールに任せる
+      if (dx < LOCK_PX) return;                                 // まだ判断できない
+      locked = true;
+    }
+    scrub(e);
+    e.preventDefault();   // 横と確定した後だけ抑止する
+  });
+
+  const end = () => { start = null; locked = false; };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);          // ブラウザがスクロールを引き取った
+  cv.addEventListener('pointerleave', e => {
+    end();
+    if (e.pointerType !== 'touch') setCursor(-1);     // タッチでは値を残す
+  });
 }
 
 function setCursor(i) {
