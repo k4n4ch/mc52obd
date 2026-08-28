@@ -119,7 +119,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260829c';
+const VERSION = 'v20260829d';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -619,18 +619,24 @@ function drawChart(s) {
   // 判定不能になるため、切ると線が細切れになって前後の段が読めない。
   // 破線＝その区間はデータが無い、実線＝実測、と読み分けられるようにする。
   const solid = new Path2D(), dashed = new Path2D();
-  let prev = null, gapped = false;
+  let prev = null, gapped = false, hadStop = false;
   for (const r of rows) {
     const v = r[s.key];
-    if (v == null) { gapped = true; continue; }
+    if (v == null) {
+      gapped = true;
+      // 停車を挟んだ欠測は繋がない。動いていない区間をまたいで線を引くと、
+      // 存在しない連続性を示してしまう（帯で停車と分かるので繋ぐ必要も無い）
+      if (r.gstate === 'stop') hadStop = true;
+      continue;
+    }
     const x = X(r.t), y = Y(v);
-    if (prev) {
+    if (prev && !hadStop) {
       const path = gapped ? dashed : solid;
       path.moveTo(prev.x, prev.y);
       if (s.step) { path.lineTo(x, prev.y); path.lineTo(x, y); }   // ギヤは階段
       else { path.lineTo(x, y); }
     }
-    prev = {x, y}; gapped = false;
+    prev = {x, y}; gapped = false; hadStop = false;
   }
   g.strokeStyle = css('--accent');
   g.lineJoin = 'round'; g.lineCap = 'round';
