@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260829b';
+const VERSION = 'v20260829c';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -928,9 +928,18 @@ $('bLog').onclick = () => {
 };
 
 // ── 設定 ────────────────────────────────────────────────
-function applySprocket() {
+/**
+ * 丁数の設定を反映する。
+ * @param save true のときだけ localStorage へ書く。初期化時に書いてしまうと、
+ *   一度も触っていなくても「設定済み」になり、ビュワー側の自動推定
+ *   （未設定のときだけ発火する）を潰してしまう。
+ */
+function applySprocket(save) {
   const f = parseInt($('sfront').value, 10);
-  if (f) { sprkFront = f; localStorage.setItem('mc52_sf', String(f)); }
+  if (f) {
+    sprkFront = f;
+    if (save) localStorage.setItem('mc52_sf', String(f));
+  }
   const c = speedCorr();
   $('corr').innerHTML = '表示車速 <b>×' + c.toFixed(4) + '</b>';
   $('settings').querySelector('.note').textContent =
@@ -950,8 +959,8 @@ function fillTeeth(el, range, stock, saved) {
   el.value = saved;
 }
 fillTeeth($('sfront'), FRONT_RANGE, STOCK_FRONT, sprkFront);
-$('sfront').onchange = applySprocket;
-applySprocket();
+$('sfront').onchange = () => applySprocket(true);
+applySprocket(false);   // 起動時は表示を整えるだけ。保存はしない
 
 $('ver').textContent = VERSION;
 setBtn('bGps', gpsEnabled);
