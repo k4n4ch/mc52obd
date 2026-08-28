@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260829c';
+const VERSION = 'v20260829d';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -817,7 +817,13 @@ function toggleRec() {
 }
 
 function dl(text, mime, ext) {
-  const name = 'cb250r_' + new Date(recT0).toISOString().slice(0, 19).replace(/[:T]/g, '-') + ext;
+  // ファイル名は**ローカル時刻**にする。toISOString() は UTC なので、朝の走行が
+  // 前日の深夜として保存されて紛らわしい（JST 08:46 → 前日 23:46）。
+  // CSV 中の iso_time は UTC のまま（Z 付きで一意に解釈できるほうが解析に向く）。
+  const d = new Date(recT0);
+  const p2 = n => String(n).padStart(2, '0');
+  const name = 'mc52_' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+             + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + ext;
   const url = URL.createObjectURL(new Blob([text], {type: mime}));
   const a = document.createElement('a');
   a.href = url; a.download = name; a.click();
