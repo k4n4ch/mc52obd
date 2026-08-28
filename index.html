@@ -160,7 +160,6 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 </div>
 <div id="settings">
   <label>前スプロケ <select id="sfront"></select></label>
-  <label>後 <select id="srear"></select></label>
   <span id="corr"></span>
   <span class="note"></span>
 </div>
@@ -168,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260828e';
+const VERSION = 'v20260829a';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -234,13 +233,17 @@ let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.013;
 
 /* ── 表示車速の補正 ────────────────────────────────────────
  * `0D` は ECU が**純正のスプロケット丁数を固定前提**にして換算した値なので、
- * 丁数を変えると真の車速からずれる。純正は前 14T / 後 36T（二次減速比 2.571、
- * 諸元表と一致）。
+ * 前スプロケットを替えると真の車速からずれる。純正は前 14T / 後 36T
+ * （二次減速比 2.571、諸元表と一致）。
  *
- *   0D = 真の車速 × (実際の二次減速比 / 純正の二次減速比)
- *   真の車速 = 0D × (純正 / 実際) = 0D × (前丁数 / 14) × (36 / 後丁数)
+ *   0D = 真の車速 × (実際の前丁数 / 14)^-1
+ *   真の車速 = 0D × (前丁数 / 14)
  *
  * 本車両は前 15T で ×1.0714。実測の 1/0.935 = 1.0695 と 0.2% で一致する。
+ *
+ * **後スプロケットは 36T 固定。** MC52 向けにサンスター RH-133 も NTB SPH-086R も
+ * 36T（純正歯数）しか出しておらず、選択肢にする意味が無い（2026-08 調べ）。
+ * 前も 12-15T しか無い（サンスター 品番361 / キタコ 530-1818）。
  *
  * **補正するのは表示だけ。ログには ECU の生値をそのまま記録する。**
  * 生値なら後から何度でも解釈し直せるが、補正済みを記録すると設定を間違えた
@@ -248,12 +251,9 @@ let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.013;
  * 生値のままだから。詳細は FINDINGS.md）。
  * ────────────────────────────────────────────────────── */
 const STOCK_FRONT = 14, STOCK_REAR = 36;
-// 実際の品揃え（2026-08 調べ）。前はサンスター 12-15T / キタコ 13-15T で
-// 16T 以上は存在しない。後はサンスター・NTB とも 36T のみで事実上固定
-const FRONT_RANGE = [12, 15], REAR_RANGE = [34, 38];
+const FRONT_RANGE = [12, 15];
 let sprkFront = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
-let sprkRear  = parseInt(localStorage.getItem('mc52_sr'), 10) || STOCK_REAR;
-const speedCorr = () => (sprkFront / STOCK_FRONT) * (STOCK_REAR / sprkRear);
+const speedCorr = () => sprkFront / STOCK_FRONT;
 let gearTol = parseFloat(localStorage.getItem('mc52_tol')) || 4.0;
 
 const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴れる
@@ -920,15 +920,15 @@ $('bLog').onclick = () => {
 
 // ── 設定 ────────────────────────────────────────────────
 function applySprocket() {
-  const f = parseInt($('sfront').value, 10), r = parseInt($('srear').value, 10);
+  const f = parseInt($('sfront').value, 10);
   if (f) { sprkFront = f; localStorage.setItem('mc52_sf', String(f)); }
-  if (r) { sprkRear = r; localStorage.setItem('mc52_sr', String(r)); }
   const c = speedCorr();
   $('corr').innerHTML = '表示車速 <b>×' + c.toFixed(4) + '</b>';
   $('settings').querySelector('.note').textContent =
     c === 1 ? '純正丁数。補正なし'
             : 'ECU は純正 ' + STOCK_FRONT + 'T/' + STOCK_REAR + 'T を固定前提で換算するため、'
-              + '丁数を変えると 0D が真の車速からずれる。表示のみ補正し、ログには生値を記録する。';
+              + '丁数を変えると 0D が真の車速からずれる。表示のみ補正し、ログには生値を記録する。'
+              + '（後は 36T 固定。MC52 は他の設定が売られていない）';
   render();
 }
 function fillTeeth(el, range, stock, saved) {
@@ -941,8 +941,7 @@ function fillTeeth(el, range, stock, saved) {
   el.value = saved;
 }
 fillTeeth($('sfront'), FRONT_RANGE, STOCK_FRONT, sprkFront);
-fillTeeth($('srear'), REAR_RANGE, STOCK_REAR, sprkRear);
-$('sfront').onchange = applySprocket; $('srear').onchange = applySprocket;
+$('sfront').onchange = applySprocket;
 applySprocket();
 
 $('ver').textContent = VERSION;

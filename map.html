@@ -101,8 +101,8 @@ button:disabled{opacity:.35}
   <label>k <input type="number" id="k" step="0.001" value="1.013"></label>
   <label>窓± <input type="number" id="tol" step="0.5" value="4"></label>%
   <label title="回転数を車速の取得時刻へ補間して揃える"><input type="checkbox" id="align" checked> 時刻補正</label>
-  <label title="ECU は純正 14T/36T 前提で換算する。表示車速のみ補正し、ギヤ判定は生値で行う">丁数
-    <select id="sf"></select>/<select id="sr"></select></label>
+  <label title="ECU は純正 14T/36T 前提で換算する。後は 36T 固定（MC52 は他の設定が売られていない）。表示車速のみ補正し、ギヤ判定は生値で行う">前丁数
+    <select id="sf"></select></label>
   <button id="fit" disabled>自動較正</button>
   <button id="estsp" disabled title="GPS 速度との一致から前後の丁数を推定する。速度比だけでは一意に決まらないため候補も出す">丁数推定</button>
   <button id="tbl" disabled>表</button>
@@ -117,7 +117,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828j';
+const VERSION = 'v20260829a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -153,19 +153,20 @@ let isolate = null;   // null=全ギヤ表示、1-6=そのギヤだけ強調
 
 /* ── 表示車速のスプロケット補正 ────────────────────────────
  * ビュワーが読むのは `speed_obd` = ECU の生値で、ECU は純正 14T/36T を固定
- * 前提に換算している。丁数を変えると真の車速からずれる。
- *   真の車速 = 0D × (前丁数 / 14) × (36 / 後丁数)
+ * 前提に換算している。前スプロケットを替えると真の車速からずれる。
+ *   真の車速 = 0D × (前丁数 / 14)
+ *
+ * **後スプロケットは 36T 固定。** MC52 向けにサンスター RH-133 も NTB SPH-086R も
+ * 36T（純正歯数）しか出しておらず、選択肢にする意味が無いため（2026-08 調べ）。
  *
  * **補正するのは表示だけ。** グラフ・カーソル値・線の太さの区分には掛けるが、
  * **ギヤ判定には掛けない**。k は生値に対して定義されているため、補正した値で
  * 比を取ると k ごとずれる（FINDINGS.md）。
  *
- * 設定は走行画面と localStorage を共有する（同一オリジン）。どちらで変えても
- * 両方に効く。 */
+ * 設定は走行画面と localStorage を共有する（同一オリジン）。 */
 const STOCK_FRONT = 14, STOCK_REAR = 36;
 const sprkFront = () => parseInt($('sf').value, 10) || STOCK_FRONT;
-const sprkRear  = () => parseInt($('sr').value, 10) || STOCK_REAR;
-const speedCorr = () => (sprkFront() / STOCK_FRONT) * (STOCK_REAR / sprkRear());
+const speedCorr = () => sprkFront() / STOCK_FRONT;
 
 /**
  * GPS 速度との一致からスプロケット丁数を推定する。
@@ -192,41 +193,31 @@ const speedCorr = () => (sprkFront() / STOCK_FRONT) * (STOCK_REAR / sprkRear());
  *
  * この範囲なら前は 7.1% 刻みになり、GPS の測定誤差 0.5% に対して一桁の余裕が
  * ある。候補が競合しないので、同点処理は保険としてしか働かない。 */
+/* 前スプロケットの設定範囲（2026-08 調べ）。
+ *   サンスター 品番361 の設定歯数が 12-15T、キタコ 530-1818 は 13/14/15T。
+ *   16T 以上は存在しない。15T でもスプロケットカバーへの干渉が報告されるほどで、
+ *   物理的に大きくできない。
+ * 隣接する丁数の係数差は 7.1% で、GPS の測定誤差 0.5% に対し一桁の余裕がある。 */
 const FRONT_RANGE = [12, 15];
-const REAR_RANGE  = [34, 38];
 
+/**
+ * GPS 速度との一致から前スプロケット丁数を推定する。
+ *
+ *   補正係数 c = Σ(GPS) / Σ(0D)   … 和の比で取る（各点の比を平均すると
+ *                                    分母のノイズで上振れする）
+ *   丁数 f の係数 = f / 14
+ *
+ * GPS は低速域で相対誤差が大きく比が発散するので 20km/h 以上だけを使う。
+ */
 function estimateSprocket() {
   const sel = rows.filter(r => r.gspd != null && r.gspd > 20 && r.spd != null && r.spd > 0);
   if (sel.length < 30) return null;
   const c = sel.reduce((a, r) => a + r.gspd, 0) / sel.reduce((a, r) => a + r.spd, 0);
-
   const cand = [];
   for (let f = FRONT_RANGE[0]; f <= FRONT_RANGE[1]; f++) {
-    for (let rr = REAR_RANGE[0]; rr <= REAR_RANGE[1]; rr++) {
-      const err = (f / STOCK_FRONT) * (STOCK_REAR / rr) / c - 1;
-      if (Math.abs(err) > 0.015) continue;
-      // 純正からの隔たり。同程度に合うなら少ないほうを採る
-      const dist = Math.abs(f - STOCK_FRONT) + Math.abs(rr - STOCK_REAR) / 2;
-      cand.push({front: f, rear: rr, err, dist});
-    }
+    cand.push({front: f, err: (f / STOCK_FRONT) / c - 1});
   }
-  if (!cand.length) return {c, n: sel.length, cand: []};
-
-  /* **「最も合う」で選んではいけない。** GPS の測定誤差（実測で走行間 0.5% ばらつく:
-   * 係数 1.0719 と 1.0663）が候補間の間隔より大きいため、0.01% の差には意味が無い。
-   * 実際、あるログでは 17/41 が 0.01% で 15/36 の 0.48% を上回り、実車と違う組が
-   * 首位になった。
-   * そこで**測定誤差の範囲内は同点**とみなし、その中では純正からの変更が少ないものを
-   * 採る（前後とも替える人は少ない、という事前分布）。data だけでは決まらないので
-   * 事前分布に決めさせる、という判断を明示しておく。 */
-  const TIE = 0.006;   // 走行間のばらつきから取った同点幅
-  const best = Math.min(...cand.map(x => Math.abs(x.err)));
-  cand.sort((a, b) => {
-    const na = Math.abs(a.err) <= best + TIE, nb = Math.abs(b.err) <= best + TIE;
-    if (na !== nb) return na ? -1 : 1;
-    if (na && nb) return a.dist - b.dist || Math.abs(a.err) - Math.abs(b.err);
-    return Math.abs(a.err) - Math.abs(b.err);
-  });
+  cand.sort((a, b) => Math.abs(a.err) - Math.abs(b.err));
   return {c, n: sel.length, cand};
 }
 
@@ -790,31 +781,22 @@ function fillTeeth(el, range, stock, saved) {
   el.value = saved;
 }
 fillTeeth($('sf'), FRONT_RANGE, STOCK_FRONT, parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT);
-fillTeeth($('sr'), REAR_RANGE, STOCK_REAR, parseInt(localStorage.getItem('mc52_sr'), 10) || STOCK_REAR);
 const onSprk = () => {
   localStorage.setItem('mc52_sf', String(sprkFront()));
-  localStorage.setItem('mc52_sr', String(sprkRear()));
   refresh();   // 比は生値のままなので k の取り直しは不要
 };
-$('sf').onchange = onSprk; $('sr').onchange = onSprk;
+$('sf').onchange = onSprk;
 
 function applyEstimate(quiet) {
   const e = estimateSprocket();
   if (!e) { if (!quiet) $('stat').textContent = 'GPS 速度が足りず丁数を推定できない'; return; }
-  if (!e.cand.length) {
-    $('stat').textContent = `実測係数 ${e.c.toFixed(4)} に合う丁数の組が範囲内に無い`
-      + `（前 ${FRONT_RANGE.join('-')}T / 後 ${REAR_RANGE.join('-')}T）`;
-    return;
-  }
   const top = e.cand[0];
-  $('sf').value = top.front; $('sr').value = top.rear;
+  $('sf').value = top.front;
   onSprk();
-  // 測定誤差の範囲では一意に決まらないので、他の候補も出して実車と照合させる
-  const alt = e.cand.slice(1, 4)
-    .map(x => `${x.front}/${x.rear}(${(x.err * 100).toFixed(2)}%)`).join(' ');
+  const second = e.cand[1];
   $('stat').textContent =
-    `丁数 ${top.front}/${top.rear}T（誤差 ${(top.err * 100).toFixed(2)}% / 実測係数 `
-    + `${e.c.toFixed(4)} / GPS ${e.n} 点）` + (alt ? ` — 他の候補 ${alt}` : '');
+    `前丁数 ${top.front}T（誤差 ${(top.err * 100).toFixed(2)}% / 実測係数 ${e.c.toFixed(4)}`
+    + ` / GPS ${e.n} 点）` + (second ? ` — 次点 ${second.front}T (${(second.err * 100).toFixed(2)}%)` : '');
 }
 $('estsp').onclick = () => applyEstimate(false);
 
