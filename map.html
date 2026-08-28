@@ -4,21 +4,25 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 /* ══ 配色 ══════════════════════════════════════════════════
- * ギヤは順序尺度（1<2<…<6）なのでカテゴリカルではなく逐次ランプを使う。
- * 単一色相(青)を light→dark で 6 段。dataviz の validator で
- * --ordinal 検証済み（単調性・段間 ΔL・光端コントラスト・色相幅すべて PASS）。
+ * ギヤは 6 色で塗り分ける。当初は順序尺度として単一色相の逐次ランプを使い
+ * validator も通していたが、実データでは青系が並んで判別できなかったため、
+ * 実用を優先してカテゴリカルへ切り替えた。
  *
  * 地図の線は暗いケーシングの上に乗せる。OSM タイル(#f2efe9 前後)に直接置くと
- * 光端が 1.56:1 でコントラスト floor を割るため、隣接面をケーシングにする。
- * ケーシング #2b2a27 に対しては 8.03:1 で通る。
+ * 明るい色がコントラスト floor を割るため、隣接面をケーシングにする。
  * ══════════════════════════════════════════════════════════ */
 :root{
   --bg:#07090d; --panel:#11151c; --line:#232b38;
   --fg:#e8eef7; --dim:#7d8899; --mute:#5b6472; --accent:#3987e5;
   --warn:#ffb020; --bad:#ff4d5e;
   --casing:#2b2a27;
-  --g1:#9ec5f4; --g2:#6da7ec; --g3:#3987e5;
-  --g4:#256abf; --g5:#184f95; --g6:#0d366b;
+  /* ギヤは 6 色で塗り分ける。skill の推奨順（slot 1-6）をそのまま使う。
+   * この順は**隣接ペアの分離**に最適化されており、ギヤは隣り合う段が経路上でも
+   * 隣接するのでその条件が効く（隣接 CVD ΔE 9.1）。
+   * 既知の弱点は 2速(橙) と 4速(黄) で、全ペア条件では通常視 ΔE 13.7 と floor を
+   * 割る。凡例に数字を併記して色だけに頼らせないことで補う。 */
+  --g1:#2a78d6; --g2:#eb6834; --g3:#1baf7a;
+  --g4:#eda100; --g5:#e87ba4; --g6:#008300;
   --gx:#8b8b86;          /* 不確定・ニュートラル。ランプ外の中立色 */
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -102,7 +106,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828b';
+const VERSION = 'v20260828c';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -133,13 +137,6 @@ for (const n in GEAR) R[n] = PRIMARY * GEAR[n] * SECONDARY / (TIRE_CIRC * 60 / 1
 const GEARS = [1,2,3,4,5,6];
 
 const GCOL = {1:'--g1',2:'--g2',3:'--g3',4:'--g4',5:'--g5',6:'--g6'};
-
-/* 色相を増やさずに識別性を上げるための第 2 チャネル。
- * ギヤは順序尺度なのでカテゴリカル 6 色は全ペア検証を通らない（4 番目の枠で
- * 黄と橙が通常視 ΔE 13.7 と floor を割る）。単一色相の順序ランプは validator を
- * 通るが、実データでは青系が並んで判別しづらい。そこで**破線パターン**を足す。
- * 低いギヤほど細かく切れるので、順序そのものも補強する。*/
-const GDASH = {1:'2,7', 2:'5,6', 3:'10,6', 4:'18,6', 5:'32,7', 6:null};
 
 let isolate = null;   // null=全ギヤ表示、1-6=そのギヤだけ強調
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -206,6 +203,32 @@ function assignGears(k, tolPct) {
     }
     if (bd <= tol) { r.gear = best; r.gstate = 'gear'; }
   }
+}
+
+/** 連続した停車区間を時刻範囲で返す。グラフの帯に使う。 */
+function stopSpans(minSec) {
+  const out = [];
+  let s = null;
+  for (const r of rows) {
+    if (r.gstate === 'stop') { if (s === null) s = r.t; }
+    else if (s !== null) { if (r.t - s >= minSec) out.push([s, r.t]); s = null; }
+  }
+  if (s !== null && rows[rows.length-1].t - s >= minSec) out.push([s, rows[rows.length-1].t]);
+  return out;
+}
+
+/** 斜線ハッチのパターン。停車帯の塗りに使う（ベタ塗りだとデータを隠す） */
+let hatchPat = null;
+function hatch(g) {
+  if (hatchPat) return hatchPat;
+  const c = document.createElement('canvas');
+  c.width = c.height = 6;
+  const h = c.getContext('2d');
+  h.strokeStyle = 'rgba(125,136,153,.55)';
+  h.lineWidth = 1;
+  h.beginPath(); h.moveTo(-1, 7); h.lineTo(7, -1); h.moveTo(2, 10); h.lineTo(10, 2); h.stroke();
+  hatchPat = g.createPattern(c, 'repeat');
+  return hatchPat;
 }
 
 /** 連続した停車点をひとまとめにし、位置と停車時間を返す。 */
@@ -305,7 +328,8 @@ function drawMap() {
     const dim = isolate !== null && run.gear !== isolate;
     // 停車区間は線を引かない（動いていないので線に意味が無い）。マーカーで示す
     if (run.st === 'stop') continue;
-    const dash = run.gear ? GDASH[run.gear] : (run.st === 'slow' ? '1,4' : '3,4');
+    // ギヤは実線。判定不能な区間だけ破線にして、色だけに頼らず区別できるようにする
+    const dash = run.gear ? null : (run.st === 'slow' ? '1,5' : '4,5');
     // ケーシングを先に敷く。下地(OSMタイル)とのコントラストはこれで担保する
     L.polyline(run.pts, {color:casing, weight:run.w + 3, opacity: dim ? .12 : .9,
       lineCap:'round', lineJoin:'round', interactive:false}).addTo(layer);
@@ -313,17 +337,6 @@ function drawMap() {
       weight:run.w, opacity: dim ? .18 : 1, dashArray: dash,
       lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(layer);
   }
-  // 停車地点。滞在時間で大きさを変える。信号待ちと休憩が一目で分かる
-  for (const s of stopRuns(3)) {
-    const rad = Math.min(11, 4 + Math.log2(s.sec));
-    L.circleMarker([s.lat, s.lon], {
-      radius: rad, color: css('--casing'), weight: 2,
-      fillColor: '#fcfcfb', fillOpacity: isolate !== null ? .25 : .95,
-      opacity: isolate !== null ? .25 : 1,
-    }).bindTooltip('停車 ' + (s.sec >= 60 ? (s.sec/60).toFixed(1) + '分' : s.sec.toFixed(0) + '秒'))
-      .addTo(layer);
-  }
-
   marker.addTo(layer);
   // 抜き出しの切り替えで視点が戻らないよう、最初の描画時だけ範囲を合わせる
   if (!drawMap._fitted) {
@@ -339,10 +352,8 @@ function addLegend() {
     let sw = '';
     // 色だけに頼らないよう、各段に数字と破線パターンを添える。タップで抜き出し
     for (const n of GEARS) {
-      const d = GDASH[n] ? ` stroke-dasharray="${GDASH[n]}"` : '';
       sw += `<span class="gsel${isolate === n ? ' on' : ''}" data-g="${n}">`
-          + `<svg width="26" height="8" viewBox="0 0 26 8"><line x1="0" y1="4" x2="26" y2="4"`
-          + ` stroke="${css(GCOL[n])}" stroke-width="5"${d}/></svg>${n}</span>`;
+          + `<span class="sw" style="background:${css(GCOL[n])}"></span>${n}</span>`;
     }
     let wd = '';
     const lbl = ['〜20','〜40','〜60','〜80','80〜'];
@@ -351,9 +362,9 @@ function addLegend() {
     d.innerHTML = `<b>ギヤ（線の色）</b><div class="row">${sw}
       </div>
       <div class="row" style="margin-top:.25rem">
-      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="3,4"/></svg><span>半クラ・シフト</span>
-      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="1,4"/></svg><span>低速</span>
-      <svg width="16" height="14"><circle cx="8" cy="7" r="5" fill="#fcfcfb" stroke="${css('--casing')}" stroke-width="2"/></svg><span>停車</span></div>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="4,5"/></svg><span>半クラ・シフト</span>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="1,5"/></svg><span>低速</span>
+      <span style="color:#52514e">停車はグラフの帯で示す</span></div>
       <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
     L.DomEvent.disableClickPropagation(d);
     d.querySelectorAll('.gsel').forEach(el => {
@@ -423,6 +434,14 @@ function drawChart(s) {
   const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
   const X = t => 30 + (w - 36) * ((t - t0) / (t1 - t0 || 1));
   const Y = v => h - 12 - (h - 20) * ((v - lo) / (hi - lo));
+
+  // 停車区間の帯。停車は「判定できない」のではなく「判定する対象が無い」ので、
+  // 判定不能とは別に示す。ベタ塗りだと下のデータを隠すのでハッチにする
+  g.fillStyle = hatch(g);
+  for (const [a, b] of stopSpans(3)) {
+    const x0 = X(a), x1 = X(b);
+    if (x1 > x0) g.fillRect(x0, 2, Math.max(1.5, x1 - x0), h - 8);
+  }
 
   // 目盛りは控えめに。上下の 2 本だけ
   g.strokeStyle = css('--line'); g.lineWidth = 1;
