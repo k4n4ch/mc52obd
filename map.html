@@ -110,7 +110,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260828e';
+const VERSION = 'v20260828f';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -391,13 +391,18 @@ function drawMap() {
     const dim = isolate !== null && run.gear !== isolate;
     // 停車区間は線を引かない（動いていないので線に意味が無い）。マーカーで示す
     if (run.st === 'stop') continue;
-    // ギヤは実線。判定不能な区間だけ破線にして、色だけに頼らず区別できるようにする
-    const dash = run.gear ? null : (run.st === 'slow' ? '1,5' : '4,5');
-    // ケーシングを先に敷く。下地(OSMタイル)とのコントラストはこれで担保する
-    L.polyline(run.pts, {color:casing, weight:run.w + 3, opacity: dim ? .12 : .9,
-      lineCap:'round', lineJoin:'round', interactive:false}).addTo(layer);
+    // ギヤは実線。判定不能な区間は**細い破線**にして、色だけに頼らず区別できる
+    // ようにする。実測と同じ太さだと同じ重みに見えてしまう
+    const dash = run.gear ? null : (run.st === 'slow' ? '1,4' : '3,4');
+    const w = run.gear ? run.w : Math.max(1.5, run.w * 0.5);
+    // ケーシングを先に敷く。下地(OSMタイル)とのコントラストはこれで担保する。
+    // 破線の区間はケーシングも同じ破線にしないと、隙間が暗く埋まって
+    // 「濃い実線」に見えてしまい破線として読めない
+    L.polyline(run.pts, {color:casing, weight:w + (run.gear ? 3 : 2), opacity: dim ? .12 : .9,
+      dashArray: dash, lineCap: dash ? 'butt' : 'round',
+      lineJoin:'round', interactive:false}).addTo(layer);
     L.polyline(run.pts, {color: run.gear ? css(GCOL[run.gear]) : css('--gx'),
-      weight:run.w, opacity: dim ? .18 : 1, dashArray: dash,
+      weight:w, opacity: dim ? .18 : 1, dashArray: dash,
       lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(layer);
   }
   marker.addTo(layer);
@@ -425,8 +430,8 @@ function addLegend() {
     d.innerHTML = `<b>ギヤ（線の色）</b><div class="row">${sw}
       </div>
       <div class="row" style="margin-top:.25rem">
-      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="4,5"/></svg><span>半クラ・シフト</span>
-      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="5" stroke-dasharray="1,5"/></svg><span>低速</span>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="3,4"/></svg><span>半クラ・シフト</span>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="1,4"/></svg><span>低速</span>
       <span style="color:#52514e">停車はグラフの帯で示す</span></div>
       <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
     L.DomEvent.disableClickPropagation(d);
@@ -514,21 +519,31 @@ function drawChart(s) {
   g.fillText((hi - pad).toFixed(s.fix), 27, Y(hi - pad) + 3);
   g.fillText((lo + pad).toFixed(s.fix), 27, Y(lo + pad) + 3);
 
-  // 2px の細い線。系列は 1 本なので色は共通のアクセント
-  g.strokeStyle = css('--accent'); g.lineWidth = 2;
-  g.lineJoin = 'round'; g.lineCap = 'round';
-  g.beginPath();
-  let pen = false, px = 0, py = 0;
+  // 2px の細い線。系列は 1 本なので色は共通のアクセント。
+  //
+  // **欠測の区間は切らずに破線で繋ぐ。** 特にギヤは半クラ・シフトのたびに
+  // 判定不能になるため、切ると線が細切れになって前後の段が読めない。
+  // 破線＝その区間はデータが無い、実線＝実測、と読み分けられるようにする。
+  const solid = new Path2D(), dashed = new Path2D();
+  let prev = null, gapped = false;
   for (const r of rows) {
     const v = r[s.key];
-    if (v == null) { pen = false; continue; }
+    if (v == null) { gapped = true; continue; }
     const x = X(r.t), y = Y(v);
-    if (!pen) { g.moveTo(x, y); pen = true; }
-    else if (s.step) { g.lineTo(x, py); g.lineTo(x, y); }   // ギヤは階段
-    else { g.lineTo(x, y); }
-    px = x; py = y;
+    if (prev) {
+      const path = gapped ? dashed : solid;
+      path.moveTo(prev.x, prev.y);
+      if (s.step) { path.lineTo(x, prev.y); path.lineTo(x, y); }   // ギヤは階段
+      else { path.lineTo(x, y); }
+    }
+    prev = {x, y}; gapped = false;
   }
-  g.stroke();
+  g.strokeStyle = css('--accent');
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  g.lineWidth = 2; g.setLineDash([]); g.stroke(solid);
+  // 繋ぎは実測より細くする。実線と同じ太さだと同じ重みに見えてしまう
+  g.lineWidth = 1; g.setLineDash([2, 3]); g.stroke(dashed);
+  g.setLineDash([]);
 
   // カーソル
   if (cursor >= 0 && cursor < rows.length) {
