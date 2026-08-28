@@ -50,6 +50,7 @@ button{font:inherit; font-size:.72rem; font-weight:600; color:var(--fg); backgro
   border:1px solid var(--line); border-radius:.3rem; padding:.32rem .55rem; cursor:pointer}
 button:active{background:#202834}
 button:disabled{opacity:.35}
+#tolMax{color:var(--mute)}
 #stat{margin-left:auto; color:var(--dim); font-size:.72rem; white-space:nowrap}
 
 /* ── 本体 ── */
@@ -99,7 +100,8 @@ button:disabled{opacity:.35}
 <div id="bar">
   <input type="file" id="file" accept=".csv,text/csv">
   <label>k <input type="number" id="k" step="0.001" value="1.013"></label>
-  <label>窓± <input type="number" id="tol" step="0.5" value="4"></label>%
+  <label title="隣接する段の窓が重ならない上限まで。上限は諸元から算出している">窓±
+    <input type="number" id="tol" step="0.5" min="0.5" value="4">% <span id="tolMax"></span></label>
   <label title="回転数を車速の取得時刻へ補間して揃える"><input type="checkbox" id="align" checked> 時刻補正</label>
   <label title="ECU は純正 14T/36T 前提で換算する。後は 36T 固定（MC52 は他の設定が売られていない）。表示車速のみ補正し、ギヤ判定は生値で行う">前丁数
     <select id="sf"></select></label>
@@ -117,7 +119,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260829a';
+const VERSION = 'v20260829b';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -146,6 +148,17 @@ const TIRE_CIRC = Math.PI * (17*25.4 + 2*150*0.60) / 1000;   // 後輪 150/60R17
 const R = {};
 for (const n in GEAR) R[n] = PRIMARY * GEAR[n] * SECONDARY / (TIRE_CIRC * 60 / 1000);
 const GEARS = [1,2,3,4,5,6];
+
+/* 判定窓の上限は諸元から決まる。窓を |比/予測 - 1| ≤ t と定義しているので、
+ * 隣接する 2 段の窓が重ならない条件は
+ *     r_a(1-t) > r_b(1+t)   →   t < (s-1)/(s+1),  s = r_a/r_b
+ * 全段に同じ窓を使うため、最も狭い 5-6速（s=1.1233）が上限を決めて 5.81%。
+ * これを超えると隣の段の領域に食い込み、判定が原理的に破綻する。
+ * 諸元から算出しているので、車種を変えても手で直す必要は無い。 */
+const TOL_MAX = Math.min(...GEARS.slice(0, -1).map(n => {
+  const s = R[n] / R[n + 1];
+  return (s - 1) / (s + 1) * 100;
+}));
 
 const GCOL = {1:'--g1',2:'--g2',3:'--g3',4:'--g4',5:'--g5',6:'--g6'};
 
@@ -768,7 +781,14 @@ $('file').onchange = e => {
 };
 $('fit').onclick = () => { computeRatios(); const k = fitK(); if (k) { $('k').value = k.toFixed(4); refresh(); } };
 $('k').oninput = refresh;
-$('tol').oninput = refresh;
+// 上限を超えると隣の段に食い込むので、入力を受け付ける段階で丸める
+$('tol').max = TOL_MAX.toFixed(1);
+$('tolMax').textContent = `(上限 ${TOL_MAX.toFixed(1)})`;
+$('tol').oninput = () => {
+  const v = parseFloat($('tol').value);
+  if (isFinite(v) && v > TOL_MAX) $('tol').value = TOL_MAX.toFixed(1);
+  refresh();
+};
 // 補正を切り替えたら k も取り直す。比の系列そのものが変わるため
 // 選択肢は探索範囲と同じ定義から作る（片方だけ直して食い違うのを防ぐ）
 function fillTeeth(el, range, stock, saved) {

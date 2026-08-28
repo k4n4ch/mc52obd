@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260829a';
+const VERSION = 'v20260829b';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -254,7 +254,16 @@ const STOCK_FRONT = 14, STOCK_REAR = 36;
 const FRONT_RANGE = [12, 15];
 let sprkFront = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
 const speedCorr = () => sprkFront / STOCK_FRONT;
+/* 判定窓の上限は諸元から決まる。窓を |比/予測 - 1| ≤ t と定義しているので、
+ * 隣接する 2 段の窓が重ならない条件は t < (s-1)/(s+1)（s は隣接段の比）。
+ * 全段に同じ窓を使うため、最も狭い 5-6速が上限を決めて 5.81%。
+ * ビュワー側と共有する localStorage の値が壊れていても、ここで丸める。 */
+const TOL_MAX = Math.min(...[1, 2, 3, 4, 5].map(n => {
+  const s = R[n] / R[n + 1];
+  return (s - 1) / (s + 1) * 100;
+}));
 let gearTol = parseFloat(localStorage.getItem('mc52_tol')) || 4.0;
+if (!(gearTol > 0) || gearTol > TOL_MAX) gearTol = Math.min(4.0, TOL_MAX);
 
 const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴れる
 
