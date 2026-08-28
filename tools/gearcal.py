@@ -200,7 +200,7 @@ def hist(pts, k, width=54):
         print(f"  {ratio:7.1f} |{bar:<{width}}|{bins[i]:5d}{tag}")
 
 
-def linearity(pts):
+def linearity(rows):
     """0D と GPS 速度の比が速度域で一定か（単一 k が成り立つかの検査）。
 
     見るのは**水準ではなく速度域による変動**。比の水準は実際のスプロケット丁数と
@@ -209,22 +209,30 @@ def linearity(pts):
     異常ではない。メーター表示は別に上乗せが入るので、これとは逆向きに動く。
     詳細は FINDINGS.md。
     """
-    have = [p for p in pts if p.get("gps") and p["gps"] > 5 and p["spd"] > 5]
+    # **k のフィット用の定常点を渡してはいけない。** あちらは回転変化率で選ぶが、
+    # それは rpm/車速比の歪みを避けるための条件で、0D と GPS の比を見るのには
+    # 不適切な部分集合になる。実測 2 走行とも、定常点に限ると低速帯だけ 0.965 /
+    # 0.985 と浮いて非線形と誤判定していた。全点で見れば 0.93〜0.94 で一貫する。
+    # 比は帯ごとに和の比 Σspd/Σgps を取る（各点の比を平均すると分母のノイズで
+    # 上振れするため）。足切りは GPS 側だけにする。分子(spd)にも足切りを
+    # かけると 0D が小さい点だけが落ちて比が上へ偏る。
+    have = [p for p in rows if p.get("gps") and p.get("spd") is not None and p["gps"] > 10]
     if len(have) < 20:
         print("\n  線形性検査: GPS 速度のある定常点が不足（%d 点）。判定不能" % len(have))
         return
-    bands = [(0, 30), (30, 50), (50, 70), (70, 200)]
+    bands = [(10, 30), (30, 50), (50, 70), (70, 200)]
     print("\n  0D / GPS 速度比（単一 k の妥当性）")
     print("  ※ 見るのは速度域による変動。比の水準は実丁数とタイヤで動くので")
     print("     1.0 から離れていること自体は異常ではない")
     print("  速度域        n    比     ばらつき")
     vals = []
     for lo, hi in bands:
-        sel = [p["spd"] / p["gps"] for p in have if lo <= p["gps"] < hi]
+        sel = [p for p in have if lo <= p["gps"] < hi]
         if len(sel) < 5:
             continue
-        m = sum(sel) / len(sel)
-        sd = (sum((v - m) ** 2 for v in sel) / len(sel)) ** 0.5
+        m = sum(p["spd"] for p in sel) / sum(p["gps"] for p in sel)   # 和の比
+        rs = [p["spd"] / p["gps"] for p in sel]
+        sd = (sum((v - m) ** 2 for v in rs) / len(rs)) ** 0.5
         vals.append(m)
         print(f"  {lo:3d}-{hi:3d} km/h {len(sel):5d}  {m:5.3f}   ±{sd:.3f}")
     if len(vals) >= 2:
@@ -305,7 +313,7 @@ def main():
             print("  → 広がりが大きいが傾向は無い。定常点の抽出条件を厳しくして再確認すること")
 
     hist(pts, k)
-    linearity(pts)
+    linearity(rows)   # 定常点ではなく全行を渡す（上記コメント参照）
 
     print("\n判定窓（この数値をアプリへ入れる）")
     print(f"  const GEAR_K = {k:.4f};")

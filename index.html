@@ -149,7 +149,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260826a';
+const VERSION = 'v20260828a';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -197,8 +197,8 @@ const V = {rpm:null, spd:null, thr:null, load:null, ect:null, volt:null, fuelsys
  * k と判定窓は localStorage 経由で map.html と共有する（同一オリジン）。
  * map.html で実走ログから自動較正した値が、次回この画面に反映される。
  *
- * 既定値 k=1.000 は予測値。`0D` が ECU 内部の固定係数による生値なら
- * 理論比と一致するはずで、実走で確かめる（詳細は FINDINGS.md）。
+ * 既定値 k=1.013 は実走 2 本の較正結果（1.0148 / 1.0116 の平均）。当初の予測 1.000
+ * との差 1.3% は、ECU が前提とする転がり円周が幾何円周より小さいため（FINDINGS.md）。
  *
  * ヒステリシスは入れていない。判定が合っているかを走りながら見るのが
  * 目的なので、生の判定をそのまま出す。安定させるのは妥当性を確認した後。
@@ -209,7 +209,7 @@ const TIRE_CIRC = Math.PI * (17 * 25.4 + 2 * 150 * 0.60) / 1000;   // 後輪 150
 const R = {};
 for (const n in GEAR_RATIO) R[n] = PRIMARY * GEAR_RATIO[n] * SECONDARY / (TIRE_CIRC * 60 / 1000);
 
-let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.000;
+let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.013;
 let gearTol = parseFloat(localStorage.getItem('mc52_tol')) || 4.0;
 
 const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴れる
