@@ -248,7 +248,9 @@ let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.013;
  * 生値のままだから。詳細は FINDINGS.md）。
  * ────────────────────────────────────────────────────── */
 const STOCK_FRONT = 14, STOCK_REAR = 36;
-const FRONT_RANGE = [12, 18], REAR_RANGE = [28, 48];   // 市販の交換用がある範囲
+// 実際の品揃え（2026-08 調べ）。前はサンスター 12-15T / キタコ 13-15T で
+// 16T 以上は存在しない。後はサンスター・NTB とも 36T のみで事実上固定
+const FRONT_RANGE = [12, 15], REAR_RANGE = [34, 38];
 let sprkFront = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
 let sprkRear  = parseInt(localStorage.getItem('mc52_sr'), 10) || STOCK_REAR;
 const speedCorr = () => (sprkFront / STOCK_FRONT) * (STOCK_REAR / sprkRear);
