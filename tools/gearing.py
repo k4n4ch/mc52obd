@@ -418,6 +418,26 @@ def fig_ranges(path):
     fy = lambda r: H - B - (r - y0) / (y1 - y0) * (H - T - B)
     ref = state(120, 14, 6)[2]
     SHIFT = 9000
+    C_LIM = '#c85a6a'
+
+    def v_for_preq(p_kw):
+        """所要出力が p_kw になる車速を返す（P_req は車速に単調増加）。"""
+        if p_kw <= 0: return None
+        a, b = 0.1, 220.0
+        for _ in range(60):
+            m = (a + b) / 2
+            if p_required(m) < p_kw: a = m
+            else: b = m
+        return (a + b) / 2
+
+    def iso_reserve(kw):
+        """余力が kw ちょうどになる (車速, 回転数) の軌跡。"""
+        pts = []
+        for r in range(3000, SHIFT + 1, 50):
+            v = v_for_preq(torque(r) * r * 0.10472 / 1000 - kw)
+            if v is not None and x0 <= v <= x1 and LUG_RPM <= r <= y1:
+                pts.append((fx(v), fy(r)))
+        return pts
 
     def seg(f, n):
         lo = v_at(LUG_RPM, f, n)
@@ -445,6 +465,16 @@ def fig_ranges(path):
                  f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="4 3" opacity="0.75"/>')
         s.append(_txt(W - R + 6, fy(r) + 4, lab, 10.5))
 
+    # 余力の等高線。バーがこれを横切る点が、その段の頭打ち
+    for kw, dash, lab, side in ((ref, '5 4', f'余力 {ref:.1f}kW', 'end'),
+                                (0.0, None, '余力ゼロ（維持できる限界）', 'start')):
+        pts = iso_reserve(kw)
+        if len(pts) > 1:
+            s.append(_path(pts, C_LIM, 1.6, dash=dash, op=0.85))
+            ex, ey = pts[-1]
+            s.append(_txt(ex + (6 if side == 'start' else -6), ey - 7, lab, 11, C_LIM,
+                          anchor=side, weight='600'))
+
     for n in GEAR:
         for f in (14, 15):
             col = C14 if f == 14 else C15_6
@@ -470,7 +500,7 @@ def fig_ranges(path):
                  f'stroke="{col}" stroke-width="6" stroke-linecap="round"/>')
         s.append(_txt(L + 48, y + 4, lab, 12.5, col, weight='600'))
     s.append(_txt(L + 14, T + 64, '破線＝回転数はまだ残っているが出力が足りない区間', 11))
-    s.append(_txt(L + 14, T + 80, '●＝出力で頭打ちになる点', 11))
+    s.append(_txt(L + 14, T + 80, '●＝出力で頭打ちになる点（余力の等高線との交点）', 11))
     s.append('</svg>')
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
 
