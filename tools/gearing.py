@@ -408,13 +408,75 @@ def fig_ladder(path):
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
 
 
+def fig_ranges(path):
+    """各段が受け持てる車速範囲。14T と 15T を段ごとに対比する。"""
+    W, H = 760, 456
+    L, R, T = 66, 110, 54
+    x0, x1 = 0, 155
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)
+    ref = state(120, 14, 6)[2]
+
+    def win(f, n):
+        lo = v_at(LUG_RPM, f, n)
+        rev, pw = v_at(9000, f, n), top_of_range(f, n, ref)
+        return lo, min(rev, pw), rev, pw < rev
+
+    s = [_hdr(W, H, '各段が受け持てる車速範囲')]
+    for v in range(0, 156, 20):
+        s.append(f'<line x1="{fx(v):.1f}" y1="{T-14}" x2="{fx(v):.1f}" y2="{T+6*54-16}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.2"/>')
+        s.append(_txt(fx(v), T - 22, f'{v}', 11.5, anchor='middle'))
+    s.append(_txt((L + W - R) / 2, T - 40, '車速 [km/h]', 12.5, anchor='middle'))
+
+    # 凡例（下端）
+    ly = H - 44
+    s.append(f'<rect x="{L}" y="{ly-9}" width="22" height="11" rx="2" fill="{C_TX}" '
+             f'opacity="0.75"/>')
+    s.append(_txt(L + 28, ly, '実用範囲', 11.5))
+    s.append(f'<rect x="{L+92}" y="{ly-9}" width="22" height="11" rx="2" fill="{C_TX}" '
+             f'opacity="0.2" stroke="{C_TX}" stroke-width="0.8" stroke-dasharray="2 2"/>')
+    s.append(_txt(L + 120, ly, '回転数では届くが出力が足りない', 11.5))
+    s.append(f'<circle cx="{L+330}" cy="{ly-3.5}" r="4" fill="{C_TX}"/>')
+    s.append(_txt(L + 340, ly, '出力で頭打ち', 11.5))
+
+    for n in GEAR:
+        yb = T + (n - 1) * 54
+        s.append(_txt(L - 14, yb + 22, f'{n}速', 13, anchor='end', weight='600'))
+        for j, f in enumerate((14, 15)):
+            col = C14 if f == 14 else C15_6
+            lo, hi, rev, plim = win(f, n)
+            y = yb + j * 20
+            if plim:   # 回転では届く領域を淡色で
+                s.append(f'<rect x="{fx(hi):.1f}" y="{y}" width="{fx(rev)-fx(hi):.1f}" '
+                         f'height="15" rx="2" fill="{col}" opacity="0.16" stroke="{col}" '
+                         f'stroke-width="0.8" stroke-dasharray="2 2"/>')
+            s.append(f'<rect x="{fx(lo):.1f}" y="{y}" width="{fx(hi)-fx(lo):.1f}" '
+                     f'height="15" rx="2.5" fill="{col}" opacity="0.85"/>')
+            if plim:
+                s.append(f'<circle cx="{fx(hi):.1f}" cy="{y+7.5}" r="4.2" fill="{col}" '
+                         f'stroke="#ffffff" stroke-width="1"/>')
+            s.append(_txt(fx(lo) - 5, y + 12, f'{f}T', 10.5, col, anchor='end'))
+        wa = win(14, n)[1] - win(14, n)[0]
+        wb = win(15, n)[1] - win(15, n)[0]
+        s.append(_txt(W - R + 12, yb + 15, f'{wa:.0f} → {wb:.0f} km/h', 11.5))
+        d = (wb / wa - 1) * 100
+        s.append(_txt(W - R + 12, yb + 30, f'{d:+.0f}%', 12.5,
+                      C15_6 if d < 0 else C_TX, weight='600'))
+    s.append(_txt(L, H - 16,
+                  '下限は 3,900rpm、上限は 9,000rpm と余力条件（3.9kW）の厳しい方', 11))
+    s.append('</svg>')
+    open(path, 'w', encoding='utf-8').write('\n'.join(s))
+
+
 def make_figures(outdir='docs'):
     import os
     os.makedirs(outdir, exist_ok=True)
     fig_power(f'{outdir}/fig1-power.svg')
     fig_window(f'{outdir}/fig2-window.svg')
     fig_ladder(f'{outdir}/fig3-ladder.svg')
-    print(f'{outdir}/fig1-power.svg\n{outdir}/fig2-window.svg\n{outdir}/fig3-ladder.svg')
+    fig_ranges(f'{outdir}/fig4-ranges.svg')
+    for f in ('fig1-power', 'fig2-window', 'fig3-ladder', 'fig4-ranges'):
+        print(f'{outdir}/{f}.svg')
 
 
 if __name__ == '__main__':
