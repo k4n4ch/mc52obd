@@ -45,40 +45,40 @@
 <text x="520.2" y="113.4" font-size="11" fill="#c85a6a" text-anchor="end" font-weight="600">余力 3.9kW</text>
 <path d="M421.0,376.7 L423.3,374.2 L425.7,371.7 L427.8,369.1 L429.9,366.6 L432.0,364.1 L434.1,361.6 L436.1,359.1 L438.2,356.6 L440.2,354.1 L442.3,351.6 L444.3,349.0 L446.3,346.5 L448.3,344.0 L450.3,341.5 L452.3,339.0 L454.3,336.5 L456.2,334.0 L458.2,331.5 L460.2,329.0 L462.1,326.4 L464.0,323.9 L465.9,321.4 L467.8,318.9 L469.6,316.4 L471.3,313.9 L473.1,311.4 L474.9,308.9 L476.7,306.3 L478.4,303.8 L480.2,301.3 L481.9,298.8 L483.7,296.3 L485.4,293.8 L487.1,291.3 L488.8,288.8 L490.5,286.2 L492.2,283.7 L493.9,281.2 L495.6,278.7 L497.3,276.2 L499.0,273.7 L500.7,271.2 L502.2,268.7 L503.8,266.1 L505.3,263.6 L506.8,261.1 L508.4,258.6 L509.9,256.1 L511.4,253.6 L512.9,251.1 L514.4,248.6 L515.9,246.0 L517.4,243.5 L518.9,241.0 L520.4,238.5 L521.9,236.0 L523.4,233.5 L524.8,231.0 L526.3,228.5 L527.8,226.0 L529.2,223.4 L530.7,220.9 L532.0,218.4 L533.4,215.9 L534.8,213.4 L536.1,210.9 L537.5,208.4 L538.8,205.9 L540.1,203.3 L541.5,200.8 L542.8,198.3 L544.1,195.8 L545.5,193.3 L546.8,190.8 L548.1,188.3 L549.4,185.8 L550.7,183.2 L552.0,180.7 L553.3,178.2 L554.6,175.7 L555.9,173.2 L557.2,170.7 L557.7,168.2 L558.3,165.7 L558.8,163.1 L559.3,160.6 L559.9,158.1 L560.4,155.6 L560.9,153.1 L561.4,150.6 L561.9,148.1 L562.4,145.6 L562.5,143.0 L562.7,140.5 L562.8,138.0 L563.0,135.5 L563.1,133.0 L563.2,130.5 L563.3,128.0 L563.4,125.5 L563.5,123.0 L563.5,120.4" fill="none" stroke="#c85a6a" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="0.85"/>
 <text x="569.5" y="113.4" font-size="11" fill="#c85a6a" text-anchor="start" font-weight="600">余力ゼロ（維持できる限界）</text>
-<line x1="130.5" y1="376.7" x2="220.1" y2="120.4" stroke="#3b82c4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="135.4" y1="376.7" x2="231.3" y2="120.4" stroke="#e07b39" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="132.9" y1="380.7" x2="132.9" y2="386.7" stroke="#767f89" stroke-width="0.8" opacity="0.5"/>
-<text x="132.9" y="396.7" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="600">1速</text>
-<line x1="166.0" y1="376.7" x2="302.0" y2="120.4" stroke="#3b82c4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="173.4" y1="376.7" x2="319.1" y2="120.4" stroke="#e07b39" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="169.7" y1="380.7" x2="169.7" y2="404.7" stroke="#767f89" stroke-width="0.8" opacity="0.5"/>
-<text x="169.7" y="414.7" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="600">2速</text>
-<line x1="203.8" y1="376.7" x2="389.2" y2="120.4" stroke="#3b82c4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="213.9" y1="376.7" x2="412.6" y2="120.4" stroke="#e07b39" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="208.9" y1="380.7" x2="208.9" y2="386.7" stroke="#767f89" stroke-width="0.8" opacity="0.5"/>
-<text x="208.9" y="396.7" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="600">3速</text>
-<line x1="235.3" y1="376.7" x2="461.9" y2="120.4" stroke="#3b82c4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="247.7" y1="376.7" x2="490.5" y2="120.4" stroke="#e07b39" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<line x1="241.5" y1="380.7" x2="241.5" y2="404.7" stroke="#767f89" stroke-width="0.8" opacity="0.5"/>
-<text x="241.5" y="414.7" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="600">4速</text>
-<line x1="262.7" y1="376.7" x2="525.1" y2="120.4" stroke="#3b82c4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<path d="M522.9,152.5 L558.1,120.4" fill="none" stroke="#e07b39" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 3" stroke-opacity="0.55"/>
-<line x1="277.0" y1="376.7" x2="522.9" y2="152.5" stroke="#e07b39" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<circle cx="522.9" cy="152.5" r="4.5" fill="#e07b39" stroke="#ffffff" stroke-width="1.2"/>
-<line x1="269.8" y1="380.7" x2="269.8" y2="386.7" stroke="#767f89" stroke-width="0.8" opacity="0.5"/>
-<text x="269.8" y="396.7" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="600">5速</text>
-<path d="M512.6,180.9 L582.2,120.4" fill="none" stroke="#3b82c4" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 3" stroke-opacity="0.55"/>
-<line x1="287.4" y1="376.7" x2="512.6" y2="180.9" stroke="#3b82c4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<circle cx="512.6" cy="180.9" r="4.5" fill="#3b82c4" stroke="#ffffff" stroke-width="1.2"/>
-<path d="M476.0,236.7 L619.3,120.4" fill="none" stroke="#e07b39" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 3" stroke-opacity="0.55"/>
-<line x1="303.5" y1="376.7" x2="476.0" y2="236.7" stroke="#e07b39" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-<circle cx="476.0" cy="236.7" r="4.5" fill="#e07b39" stroke="#ffffff" stroke-width="1.2"/>
-<line x1="295.4" y1="380.7" x2="295.4" y2="404.7" stroke="#767f89" stroke-width="0.8" opacity="0.5"/>
-<text x="295.4" y="414.7" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="600">6速</text>
-<line x1="76" y1="56" x2="102" y2="56" stroke="#3b82c4" stroke-width="6" stroke-linecap="round"/>
-<text x="110.0" y="60.0" font-size="12.5" fill="#3b82c4" text-anchor="start" font-weight="600">14T</text>
-<line x1="76" y1="76" x2="102" y2="76" stroke="#e07b39" stroke-width="6" stroke-linecap="round"/>
-<text x="110.0" y="80.0" font-size="12.5" fill="#e07b39" text-anchor="start" font-weight="600">15T</text>
-<text x="76.0" y="94.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">破線＝回転数はまだ残っているが出力が足りない区間</text>
-<text x="76.0" y="110.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">●＝出力で頭打ちになる点（余力の等高線との交点）</text>
+<line x1="130.5" y1="376.7" x2="220.1" y2="120.4" stroke="#2a78d6" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+<line x1="135.4" y1="376.7" x2="231.3" y2="120.4" stroke="#2a78d6" stroke-width="6" stroke-dasharray="13 7" opacity="0.9"/>
+<line x1="132.9" y1="380.7" x2="132.9" y2="386.7" stroke="#2a78d6" stroke-width="0.9" opacity="0.6"/>
+<text x="132.9" y="396.7" font-size="12.5" fill="#2a78d6" text-anchor="middle" font-weight="600">1速</text>
+<line x1="166.0" y1="376.7" x2="302.0" y2="120.4" stroke="#eb6834" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+<line x1="173.4" y1="376.7" x2="319.1" y2="120.4" stroke="#eb6834" stroke-width="6" stroke-dasharray="13 7" opacity="0.9"/>
+<line x1="169.7" y1="380.7" x2="169.7" y2="404.7" stroke="#eb6834" stroke-width="0.9" opacity="0.6"/>
+<text x="169.7" y="414.7" font-size="12.5" fill="#eb6834" text-anchor="middle" font-weight="600">2速</text>
+<line x1="203.8" y1="376.7" x2="389.2" y2="120.4" stroke="#1baf7a" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+<line x1="213.9" y1="376.7" x2="412.6" y2="120.4" stroke="#1baf7a" stroke-width="6" stroke-dasharray="13 7" opacity="0.9"/>
+<line x1="208.9" y1="380.7" x2="208.9" y2="386.7" stroke="#1baf7a" stroke-width="0.9" opacity="0.6"/>
+<text x="208.9" y="396.7" font-size="12.5" fill="#1baf7a" text-anchor="middle" font-weight="600">3速</text>
+<line x1="235.3" y1="376.7" x2="461.9" y2="120.4" stroke="#eda100" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+<line x1="247.7" y1="376.7" x2="490.5" y2="120.4" stroke="#eda100" stroke-width="6" stroke-dasharray="13 7" opacity="0.9"/>
+<line x1="241.5" y1="380.7" x2="241.5" y2="404.7" stroke="#eda100" stroke-width="0.9" opacity="0.6"/>
+<text x="241.5" y="414.7" font-size="12.5" fill="#eda100" text-anchor="middle" font-weight="600">4速</text>
+<line x1="262.7" y1="376.7" x2="525.1" y2="120.4" stroke="#e87ba4" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+<path d="M522.9,152.5 L558.1,120.4" fill="none" stroke="#e87ba4" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="13 7" stroke-opacity="0.5"/>
+<line x1="277.0" y1="376.7" x2="522.9" y2="152.5" stroke="#e87ba4" stroke-width="6" stroke-dasharray="13 7" opacity="0.9"/>
+<circle cx="522.9" cy="152.5" r="4.5" fill="#e87ba4" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="269.8" y1="380.7" x2="269.8" y2="386.7" stroke="#e87ba4" stroke-width="0.9" opacity="0.6"/>
+<text x="269.8" y="396.7" font-size="12.5" fill="#e87ba4" text-anchor="middle" font-weight="600">5速</text>
+<path d="M512.6,180.9 L582.2,120.4" fill="none" stroke="#008300" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="0.5"/>
+<line x1="287.4" y1="376.7" x2="512.6" y2="180.9" stroke="#008300" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+<circle cx="512.6" cy="180.9" r="4.5" fill="#008300" stroke="#ffffff" stroke-width="1.2"/>
+<path d="M476.0,236.7 L619.3,120.4" fill="none" stroke="#008300" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="13 7" stroke-opacity="0.5"/>
+<line x1="303.5" y1="376.7" x2="476.0" y2="236.7" stroke="#008300" stroke-width="6" stroke-dasharray="13 7" opacity="0.9"/>
+<circle cx="476.0" cy="236.7" r="4.5" fill="#008300" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="295.4" y1="380.7" x2="295.4" y2="404.7" stroke="#008300" stroke-width="0.9" opacity="0.6"/>
+<text x="295.4" y="414.7" font-size="12.5" fill="#008300" text-anchor="middle" font-weight="600">6速</text>
+<line x1="76" y1="56" x2="114" y2="56" stroke="#767f89" stroke-width="6" opacity="0.8"/>
+<text x="122.0" y="60.0" font-size="12.5" fill="#767f89" text-anchor="start" font-weight="600">14T（実線）</text>
+<line x1="76" y1="76" x2="114" y2="76" stroke="#767f89" stroke-width="6" stroke-dasharray="13 7" opacity="0.8"/>
+<text x="122.0" y="80.0" font-size="12.5" fill="#767f89" text-anchor="start" font-weight="600">15T（破線）</text>
+<text x="76.0" y="96.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">色は段（アプリのギア色と同じ）　細線＝出力が足りず使えない区間</text>
+<text x="76.0" y="112.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">●＝出力で頭打ちになる点（余力の等高線との交点）</text>
 </svg>

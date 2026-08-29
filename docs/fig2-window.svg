@@ -18,14 +18,14 @@
 <line x1="634.4" y1="36" x2="634.4" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
 <text x="634.4" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">130</text>
 <text x="378.6" y="12.0" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="normal">車速 [km/h]</text>
-<rect x="163.5" y="58" width="403.6" height="26" rx="4" fill="#3b82c4" opacity="0.82"/>
-<text x="84.0" y="76.0" font-size="13" fill="#3b82c4" text-anchor="end" font-weight="600">14T 6速</text>
+<rect x="163.5" y="58" width="403.6" height="26" rx="4" fill="#008300" opacity="0.82"/>
+<text x="84.0" y="76.0" font-size="13" fill="#008300" text-anchor="end" font-weight="600">14T 6速</text>
 <text x="577.1" y="76.0" font-size="12" fill="#767f89" text-anchor="start" font-weight="normal">60–120（幅 60）</text>
-<rect x="192.3" y="102" width="309.1" height="26" rx="4" fill="#e07b39" opacity="0.82"/>
-<text x="84.0" y="120.0" font-size="13" fill="#e07b39" text-anchor="end" font-weight="600">15T 6速</text>
+<rect x="192.3" y="102" width="309.1" height="26" rx="4" fill="#008300" opacity="0.34" stroke="#008300" stroke-width="2.2" stroke-dasharray="15 8"/>
+<text x="84.0" y="120.0" font-size="13" fill="#008300" text-anchor="end" font-weight="600">15T 6速</text>
 <text x="511.4" y="120.0" font-size="12" fill="#767f89" text-anchor="start" font-weight="normal">64–110（幅 46）</text>
-<rect x="144.8" y="146" width="440.7" height="26" rx="4" fill="#2fa363" opacity="0.82"/>
-<text x="84.0" y="164.0" font-size="13" fill="#2fa363" text-anchor="end" font-weight="600">15T 5速</text>
+<rect x="144.8" y="146" width="440.7" height="26" rx="4" fill="#e87ba4" opacity="0.34" stroke="#e87ba4" stroke-width="2.2" stroke-dasharray="15 8"/>
+<text x="84.0" y="164.0" font-size="13" fill="#e87ba4" text-anchor="end" font-weight="600">15T 5速</text>
 <text x="595.6" y="164.0" font-size="12" fill="#767f89" text-anchor="start" font-weight="normal">57–123（幅 65）</text>
 <line x1="163.3" y1="48" x2="163.3" y2="196" stroke="#767f89" stroke-width="1" stroke-dasharray="3 3"/>
 <line x1="567.1" y1="48" x2="567.1" y2="196" stroke="#767f89" stroke-width="1" stroke-dasharray="3 3"/>

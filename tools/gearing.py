@@ -204,7 +204,19 @@ def table_sensitivity():
 # GitHub の light / dark どちらでも読めるよう中間色で塗る（メディアクエリは
 # <img> 経由だと効かないことがあるため使わない）
 C_AX, C_TX, C_GR = '#9aa4ae', '#767f89', '#808a94'
-C14, C15_6, C15_5, C_RES = '#3b82c4', '#e07b39', '#2fa363', '#9aa4ae'
+C_RES = '#9aa4ae'
+# 段の色は map.html の --g1〜--g6 と揃える。丁数は線種で区別する
+GC = {1: '#2a78d6', 2: '#eb6834', 3: '#1baf7a',
+      4: '#eda100', 5: '#e87ba4', 6: '#008300'}
+DASH15 = '13 7'          # 15T は破線
+
+
+def _ink(hexcol):
+    """背景色に対して読める文字色（黒か白）を返す。"""
+    r, g, b = (int(hexcol[i:i+2], 16) / 255 for i in (1, 3, 5))
+    f = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    return '#1c1c1c' if 0.2126*f(r) + 0.7152*f(g) + 0.0722*f(b) > 0.42 else '#ffffff'
+C14, C15_6, C15_5 = GC[6], GC[6], GC[5]
 FONT = "-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif"
 
 
@@ -259,10 +271,10 @@ def fig_power(path):
         s.append(_path(pts, C_RES, 1.9 if g == 0 else 1.3, dash))
     s.append(_txt(fx(63), fy(1.0), '走行抵抗　平坦 / 勾配3% / 5%', 11.5, C_RES))
 
-    # 各段の出力曲線
+    # 各段の出力曲線（色＝段、線種＝丁数）
     tops, dots = [], []
-    for (f, gr), col, lab in (((14, 6), C14, '14T 6速'), ((15, 6), C15_6, '15T 6速'),
-                              ((15, 5), C15_5, '15T 5速')):
+    for f, gr in ((14, 6), (15, 6), (15, 5)):
+        col = GC[gr]
         pts, top = [], None
         for i in range(int(x0), int(x1) + 1):
             r = rpm_at(i, f, gr)
@@ -270,7 +282,7 @@ def fig_power(path):
             pw = torque(r) * r * 0.10472 / 1000
             pts.append((fx(i), fy(min(pw, y1))))
             if pw >= p_required(i): top = i
-        s.append(_path(pts, col, 2.4))
+        s.append(_path(pts, col, 2.4, dash=None if f == 14 else DASH15))
         if top:
             tops.append(top)
             dots.append((fx(top), fy(p_required(top)), col))
@@ -280,11 +292,13 @@ def fig_power(path):
 
     # 凡例（左上の空き）
     lx, ly = fx(52), fy(21.2)
-    for i, (col, lab) in enumerate(((C14, '14T 6速'), (C15_6, '15T 6速'), (C15_5, '15T 5速'))):
+    for i, (f, gr) in enumerate(((14, 6), (15, 6), (15, 5))):
         y = ly + i * 19
         s.append(f'<line x1="{lx:.1f}" y1="{y:.1f}" x2="{lx+26:.1f}" y2="{y:.1f}" '
-                 f'stroke="{col}" stroke-width="2.6"/>')
-        s.append(_txt(lx + 33, y + 4, lab, 12.5, col, weight='600'))
+                 f'stroke="{GC[gr]}" stroke-width="2.6"'
+                 f'{"" if f == 14 else f" stroke-dasharray=\"7 4\""}/>')
+        s.append(_txt(lx + 33, y + 4, f'{f}T {gr}速', 12.5, GC[gr], weight='600'))
+    s.append(_txt(lx, ly + 3 * 19 + 4, '実線＝14T　破線＝15T', 11))
 
     # 100km/h での余力
     va = 100
@@ -327,13 +341,18 @@ def fig_window(path):
     s.append(_txt(fx(92), T - 34, '車速 [km/h]', 12.5, anchor='middle'))
 
     ref = state(120, 14, 6)[2]
-    rows = [((14, 6), '14T 6速', C14), ((15, 6), '15T 6速', C15_6), ((15, 5), '15T 5速', C15_5)]
-    for i, ((f, g), lab, col) in enumerate(rows):
+    for i, (f, g) in enumerate(((14, 6), (15, 6), (15, 5))):
+        col = GC[g]
         lo, hi = v_at(LUG_RPM, f, g), top_of_range(f, g, ref)
         y = T + 12 + i * 44
-        s.append(f'<rect x="{fx(lo):.1f}" y="{y}" width="{fx(hi)-fx(lo):.1f}" height="26" '
-                 f'rx="4" fill="{col}" opacity="0.82"/>')
-        s.append(_txt(L - 12, y + 18, lab, 13, col, anchor='end', weight='600'))
+        if f == 14:
+            s.append(f'<rect x="{fx(lo):.1f}" y="{y}" width="{fx(hi)-fx(lo):.1f}" '
+                     f'height="26" rx="4" fill="{col}" opacity="0.82"/>')
+        else:
+            s.append(f'<rect x="{fx(lo):.1f}" y="{y}" width="{fx(hi)-fx(lo):.1f}" '
+                     f'height="26" rx="4" fill="{col}" opacity="0.34" stroke="{col}" '
+                     f'stroke-width="2.2" stroke-dasharray="15 8"/>')
+        s.append(_txt(L - 12, y + 18, f'{f}T {g}速', 13, col, anchor='end', weight='600'))
         s.append(_txt(fx(hi) + 10, y + 18, f'{lo:.0f}–{hi:.0f}（幅 {hi-lo:.0f}）', 12))
     yb = T + 12 + 3 * 44
     s.append(f'<line x1="{fx(60):.1f}" y1="{T+2}" x2="{fx(60):.1f}" y2="{yb+6}" '
@@ -366,17 +385,19 @@ def fig_ladder(path):
 
     for i, f in enumerate((14, 15)):
         y = T + 16 + i * 52
-        col = C14 if f == 14 else C15_6
-        s.append(_txt(L - 14, y + 5, f'{f}T', 13.5, col, anchor='end', weight='600'))
+        s.append(_txt(L - 14, y + 5, f'{f}T', 13.5, anchor='end', weight='600'))
         s.append(f'<line x1="{fx(reduction(f,1)):.1f}" y1="{y}" '
-                 f'x2="{fx(reduction(f,6)):.1f}" y2="{y}" stroke="{col}" '
-                 f'stroke-width="1.4" opacity="0.5"/>')
+                 f'x2="{fx(reduction(f,6)):.1f}" y2="{y}" stroke="{C_TX}" '
+                 f'stroke-width="1.4" opacity="0.45"'
+                 f'{"" if f == 14 else " stroke-dasharray=\"6 4\""}/>')
         for n in GEAR:
             x = fx(reduction(f, n))
             hl = (f == 15 and n == 5) or (f == 14 and n == 6)
+            col = GC[n]
             s.append(f'<circle cx="{x:.1f}" cy="{y}" r="{11 if hl else 9}" fill="{col}" '
-                     f'opacity="{1.0 if hl else 0.8}"/>')
-            s.append(f'<text x="{x:.1f}" y="{y+4:.0f}" font-size="11" fill="#ffffff" '
+                     f'opacity="{1.0 if hl else 0.8}"'
+                     f'{"" if f == 14 else f" stroke=\"{col}\" stroke-width=\"1.6\" stroke-dasharray=\"3 2\""}/>')
+            s.append(f'<text x="{x:.1f}" y="{y+4:.0f}" font-size="11" fill="{_ink(col)}" '
                      f'text-anchor="middle" font-weight="600">{n}</text>')
 
     # 一様シフト
@@ -390,9 +411,11 @@ def fig_ladder(path):
     # 15T の 6速は 14T に無い高さ（右外に出す）
     x6t = fx(reduction(15, 6))
     s.append(f'<line x1="{x6t:.1f}" y1="{T+68}" x2="{W-R+16:.1f}" y2="{T+68}" '
-             f'stroke="{C15_6}" stroke-width="1" stroke-dasharray="3 3"/>')
-    s.append(_txt(W - R + 20, T + 64, '14T に無い', 11, C15_6))
-    s.append(_txt(W - R + 20, T + 78, '高さ', 11, C15_6))
+             f'stroke="{GC[6]}" stroke-width="1" stroke-dasharray="3 3"/>')
+    s.append(_txt(W - R + 20, T + 64, '14T に無い', 11, GC[6]))
+    s.append(_txt(W - R + 20, T + 78, '高さ', 11, GC[6]))
+    s.append(_txt(L - 14, T + 108, '実線＝14T', 10.5, anchor='end'))
+    s.append(_txt(L - 14, T + 122, '破線＝15T', 10.5, anchor='end'))
 
     # 15T5速 ≒ 14T6速
     x5, x6 = fx(reduction(15, 5)), fx(reduction(14, 6))
@@ -476,31 +499,35 @@ def fig_ranges(path):
                           anchor=side, weight='600'))
 
     for n in GEAR:
+        col = GC[n]
         for f in (14, 15):
-            col = C14 if f == 14 else C15_6
+            da = None if f == 14 else DASH15
             lo, hi, rhi, plim, rev = seg(f, n)
-            if plim:
+            if plim:   # 回転はまだ残っているのに出力で止まる区間は細く
                 s.append(_path([(fx(hi), fy(rhi)), (fx(rev), fy(SHIFT))], col, 2.0,
-                               dash='3 3', op=0.55))
+                               dash=da, op=0.5))
+            cap = ' stroke-linecap="round"' if f == 14 else f' stroke-dasharray="{DASH15}"'
             s.append(f'<line x1="{fx(lo):.1f}" y1="{fy(LUG_RPM):.1f}" '
                      f'x2="{fx(hi):.1f}" y2="{fy(rhi):.1f}" stroke="{col}" '
-                     f'stroke-width="6" stroke-linecap="round" opacity="0.9"/>')
+                     f'stroke-width="6"{cap} opacity="0.9"/>')
             if plim:
                 s.append(f'<circle cx="{fx(hi):.1f}" cy="{fy(rhi):.1f}" r="4.5" '
                          f'fill="{col}" stroke="#ffffff" stroke-width="1.2"/>')
         xm = (v_at(LUG_RPM, 14, n) + v_at(LUG_RPM, 15, n)) / 2
         yl = fy(LUG_RPM) + (20 if n % 2 else 38)
         s.append(f'<line x1="{fx(xm):.1f}" y1="{fy(LUG_RPM)+4:.1f}" x2="{fx(xm):.1f}" '
-                 f'y2="{yl-10:.1f}" stroke="{C_TX}" stroke-width="0.8" opacity="0.5"/>')
-        s.append(_txt(fx(xm), yl, f'{n}速', 12.5, anchor='middle', weight='600'))
+                 f'y2="{yl-10:.1f}" stroke="{col}" stroke-width="0.9" opacity="0.6"/>')
+        s.append(_txt(fx(xm), yl, f'{n}速', 12.5, col, anchor='middle', weight='600'))
 
-    for i, (col, lab) in enumerate(((C14, '14T'), (C15_6, '15T'))):
+    for i, (lab, da) in enumerate((('14T（実線）', ''),
+                                  ('15T（破線）', f' stroke-dasharray="{DASH15}"'))):
         y = T + 26 + i * 20
-        s.append(f'<line x1="{L+14:.0f}" y1="{y}" x2="{L+40:.0f}" y2="{y}" '
-                 f'stroke="{col}" stroke-width="6" stroke-linecap="round"/>')
-        s.append(_txt(L + 48, y + 4, lab, 12.5, col, weight='600'))
-    s.append(_txt(L + 14, T + 64, '破線＝回転数はまだ残っているが出力が足りない区間', 11))
-    s.append(_txt(L + 14, T + 80, '●＝出力で頭打ちになる点（余力の等高線との交点）', 11))
+        s.append(f'<line x1="{L+14:.0f}" y1="{y}" x2="{L+52:.0f}" y2="{y}" '
+                 f'stroke="{C_TX}" stroke-width="6"{da} opacity="0.8"/>')
+        s.append(_txt(L + 60, y + 4, lab, 12.5, weight='600'))
+    s.append(_txt(L + 14, T + 66, '色は段（アプリのギア色と同じ）　'
+                  '細線＝出力が足りず使えない区間', 11))
+    s.append(_txt(L + 14, T + 82, '●＝出力で頭打ちになる点（余力の等高線との交点）', 11))
     s.append('</svg>')
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
 
