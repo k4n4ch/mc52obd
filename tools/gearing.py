@@ -200,12 +200,231 @@ def table_sensitivity():
     for f, g in ((14, 6), (15, 6), (15, 5)):
         print(f'  {f}T {g} 速: {v_at(REV_LIMIT, f, g):.0f} km/h')
 
+# ---------------------------------------------------------------- 図の生成
+# GitHub の light / dark どちらでも読めるよう中間色で塗る（メディアクエリは
+# <img> 経由だと効かないことがあるため使わない）
+C_AX, C_TX, C_GR = '#9aa4ae', '#767f89', '#808a94'
+C14, C15_6, C15_5, C_RES = '#3b82c4', '#e07b39', '#2fa363', '#9aa4ae'
+FONT = "-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif"
+
+
+def _hdr(w, h, title):
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+            f'width="{w}" height="{h}" font-family="{FONT}" role="img">'
+            f'<title>{title}</title>')
+
+
+def _txt(x, y, s, size=12, fill=None, anchor='start', weight='normal'):
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" fill="{fill or C_TX}" '
+            f'text-anchor="{anchor}" font-weight="{weight}">{s}</text>')
+
+
+def _path(pts, color, width=2.0, dash=None):
+    d = 'M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in pts)
+    da = f' stroke-dasharray="{dash}"' if dash else ''
+    return (f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{width}"'
+            f' stroke-linejoin="round" stroke-linecap="round"{da}/>')
+
+
+def fig_power(path):
+    """出力‐走行抵抗線図。余力＝縦の隙間、最高速＝交点。"""
+    W, H = 760, 460
+    L, R, T, B = 62, 34, 26, 52
+    x0, x1, y0, y1 = 50, 145, 0, 22
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)
+    fy = lambda v: H - B - (v - y0) / (y1 - y0) * (H - T - B)
+    s = [_hdr(W, H, '出力‐走行抵抗線図')]
+
+    for v in range(60, 145, 20):
+        s.append(f'<line x1="{fx(v):.1f}" y1="{T}" x2="{fx(v):.1f}" y2="{H-B}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.22"/>')
+        s.append(_txt(fx(v), H - B + 18, f'{v}', 12, anchor='middle'))
+    for p_ in range(0, 23, 5):
+        s.append(f'<line x1="{L}" y1="{fy(p_):.1f}" x2="{W-R}" y2="{fy(p_):.1f}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.22"/>')
+        s.append(_txt(L - 8, fy(p_) + 4, f'{p_}', 12, anchor='end'))
+    s.append(_txt((L + W - R) / 2, H - 14, '車速 [km/h]', 12.5, anchor='middle'))
+    s.append(f'<text x="16" y="{(T+H-B)/2:.0f}" font-size="12.5" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 16 {(T+H-B)/2:.0f})">出力 [kW]</text>')
+
+    # 走行抵抗（平坦・勾配3%・5%）。左端で分離しているのでそちらに注記
+    for g, dash, lab in ((5, '2 3', '勾配 5%'), (3, '5 4', '勾配 3%'), (0, None, '平坦')):
+        pts = []
+        for i in range(int(x0), int(x1) + 1):
+            v = i / 3.6
+            pw = (0.5 * RHO * CDA * v * v + CRR * MASS * 9.81
+                  + MASS * 9.81 * g / 100) * v / 1000
+            if pw <= y1: pts.append((fx(i), fy(pw)))
+        s.append(_path(pts, C_RES, 1.9 if g == 0 else 1.3, dash))
+    s.append(_txt(fx(63), fy(1.0), '走行抵抗　平坦 / 勾配3% / 5%', 11.5, C_RES))
+
+    # 各段の出力曲線
+    tops, dots = [], []
+    for (f, gr), col, lab in (((14, 6), C14, '14T 6速'), ((15, 6), C15_6, '15T 6速'),
+                              ((15, 5), C15_5, '15T 5速')):
+        pts, top = [], None
+        for i in range(int(x0), int(x1) + 1):
+            r = rpm_at(i, f, gr)
+            if r > REV_LIMIT: break
+            pw = torque(r) * r * 0.10472 / 1000
+            pts.append((fx(i), fy(min(pw, y1))))
+            if pw >= p_required(i): top = i
+        s.append(_path(pts, col, 2.4))
+        if top:
+            tops.append(top)
+            dots.append((fx(top), fy(p_required(top)), col))
+    # 14T 6速 と 15T 5速 は同じ点に落ちるので、外側に大きく描いてから重ねる
+    for r_, (dx, dy, col) in zip((7.0, 4.5, 4.5), reversed(dots)):
+        s.append(f'<circle cx="{dx:.1f}" cy="{dy:.1f}" r="{r_}" fill="{col}"/>')
+
+    # 凡例（左上の空き）
+    lx, ly = fx(52), fy(21.2)
+    for i, (col, lab) in enumerate(((C14, '14T 6速'), (C15_6, '15T 6速'), (C15_5, '15T 5速'))):
+        y = ly + i * 19
+        s.append(f'<line x1="{lx:.1f}" y1="{y:.1f}" x2="{lx+26:.1f}" y2="{y:.1f}" '
+                 f'stroke="{col}" stroke-width="2.6"/>')
+        s.append(_txt(lx + 33, y + 4, lab, 12.5, col, weight='600'))
+
+    # 100km/h での余力
+    va = 100
+    yr = fy(p_required(va))
+    y14 = fy(torque(rpm_at(va, 14, 6)) * rpm_at(va, 14, 6) * 0.10472 / 1000)
+    y15 = fy(torque(rpm_at(va, 15, 6)) * rpm_at(va, 15, 6) * 0.10472 / 1000)
+    s.append(f'<line x1="{fx(va):.1f}" y1="{yr:.1f}" x2="{fx(va):.1f}" y2="{y14:.1f}" '
+             f'stroke="{C_TX}" stroke-width="1.3"/>')
+    for yy in (yr, y14, y15):
+        s.append(f'<line x1="{fx(va)-5:.1f}" y1="{yy:.1f}" x2="{fx(va)+5:.1f}" y2="{yy:.1f}" '
+                 f'stroke="{C_TX}" stroke-width="1.3"/>')
+    s.append(_txt(fx(va) - 10, (yr + y14) / 2 + 4, 'この隙間が余力', 12, anchor='end',
+                  weight='600'))
+
+    # 最高速
+    if tops:
+        s.append(f'<line x1="{fx(min(tops)):.1f}" y1="{fy(y1):.1f}" '
+                 f'x2="{fx(min(tops)):.1f}" y2="{fy(p_required(min(tops)))-8:.1f}" '
+                 f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="3 3"/>')
+        s.append(_txt(fx(min(tops)) - 10, fy(21.5), '●＝走行抵抗との交点＝最高速', 12,
+                      anchor='end', weight='600'))
+        s.append(_txt(fx(min(tops)) - 10, fy(20.4),
+                      f'3本とも {min(tops):.0f}–{max(tops):.0f} km/h に集まる', 11.5,
+                      anchor='end'))
+    s.append('</svg>')
+    open(path, 'w', encoding='utf-8').write('\n'.join(s))
+
+
+def fig_window(path):
+    """6速の実用窓。両端を決める要因が違うことを示す。"""
+    W, H = 760, 280
+    L, R, T = 96, 92, 46
+    x0, x1 = 50, 135
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)
+    s = [_hdr(W, H, '6速の実用窓')]
+    for v in range(50, 136, 10):
+        s.append(f'<line x1="{fx(v):.1f}" y1="{T-10}" x2="{fx(v):.1f}" y2="{T+150}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.22"/>')
+        s.append(_txt(fx(v), T - 18, f'{v}', 12, anchor='middle'))
+    s.append(_txt(fx(92), T - 34, '車速 [km/h]', 12.5, anchor='middle'))
+
+    ref = state(120, 14, 6)[2]
+    rows = [((14, 6), '14T 6速', C14), ((15, 6), '15T 6速', C15_6), ((15, 5), '15T 5速', C15_5)]
+    for i, ((f, g), lab, col) in enumerate(rows):
+        lo, hi = v_at(LUG_RPM, f, g), top_of_range(f, g, ref)
+        y = T + 12 + i * 44
+        s.append(f'<rect x="{fx(lo):.1f}" y="{y}" width="{fx(hi)-fx(lo):.1f}" height="26" '
+                 f'rx="4" fill="{col}" opacity="0.82"/>')
+        s.append(_txt(L - 12, y + 18, lab, 13, col, anchor='end', weight='600'))
+        s.append(_txt(fx(hi) + 10, y + 18, f'{lo:.0f}–{hi:.0f}（幅 {hi-lo:.0f}）', 12))
+    yb = T + 12 + 3 * 44
+    s.append(f'<line x1="{fx(60):.1f}" y1="{T+2}" x2="{fx(60):.1f}" y2="{yb+6}" '
+             f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="3 3"/>')
+    s.append(f'<line x1="{fx(120):.1f}" y1="{T+2}" x2="{fx(120):.1f}" y2="{yb+6}" '
+             f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="3 3"/>')
+    s.append(_txt(fx(60), yb + 22, '下端は回転数で決まる', 11.5, anchor='middle'))
+    s.append(_txt(fx(60), yb + 38, '（3,900rpm に達する車速）', 11, anchor='middle'))
+    s.append(_txt(fx(120), yb + 22, '上端は出力で決まる', 11.5, anchor='middle'))
+    s.append(_txt(fx(120), yb + 38, f'（余力が {ref:.1f}kW を切る車速）', 11, anchor='middle'))
+    s.append('</svg>')
+    open(path, 'w', encoding='utf-8').write('\n'.join(s))
+
+
+def fig_ladder(path):
+    """総減速比のラダー。一様シフトと 15T5速≒14T6速 を同時に示す。"""
+    import math as _m
+    W, H = 760, 320
+    L, R, T = 84, 104, 74
+    lo, hi = 6.75, 26.0
+    fx = lambda r: L + (_m.log(hi) - _m.log(r)) / (_m.log(hi) - _m.log(lo)) * (W - L - R)
+    s = [_hdr(W, H, '総減速比のラダー')]
+    for r in (25, 20, 16, 12, 10, 8, 7):
+        s.append(f'<line x1="{fx(r):.1f}" y1="{T-12}" x2="{fx(r):.1f}" y2="{T+96}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.2"/>')
+        s.append(_txt(fx(r), T - 20, f'{r}', 11.5, anchor='middle'))
+    s.append(_txt((L + W - R) / 2, T - 42, '総減速比（対数軸）', 12.5, anchor='middle'))
+    s.append(_txt(L, T - 42, '←ロー', 11.5))
+    s.append(_txt(W - R, T - 42, 'ハイ→', 11.5, anchor='end'))
+
+    for i, f in enumerate((14, 15)):
+        y = T + 16 + i * 52
+        col = C14 if f == 14 else C15_6
+        s.append(_txt(L - 14, y + 5, f'{f}T', 13.5, col, anchor='end', weight='600'))
+        s.append(f'<line x1="{fx(reduction(f,1)):.1f}" y1="{y}" '
+                 f'x2="{fx(reduction(f,6)):.1f}" y2="{y}" stroke="{col}" '
+                 f'stroke-width="1.4" opacity="0.5"/>')
+        for n in GEAR:
+            x = fx(reduction(f, n))
+            hl = (f == 15 and n == 5) or (f == 14 and n == 6)
+            s.append(f'<circle cx="{x:.1f}" cy="{y}" r="{11 if hl else 9}" fill="{col}" '
+                     f'opacity="{1.0 if hl else 0.8}"/>')
+            s.append(f'<text x="{x:.1f}" y="{y+4:.0f}" font-size="11" fill="#ffffff" '
+                     f'text-anchor="middle" font-weight="600">{n}</text>')
+
+    # 一様シフト
+    ya, yb = T + 16, T + 68
+    for n in (1, 2, 3, 4):
+        xa, xb = fx(reduction(14, n)), fx(reduction(15, n))
+        s.append(f'<line x1="{xa:.1f}" y1="{ya+12}" x2="{xb:.1f}" y2="{yb-12}" '
+                 f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="2 3" opacity="0.75"/>')
+    s.append(_txt(fx(14.0), T + 46, '全段が一様に 6.7% ハイギア', 11.5, weight='600'))
+
+    # 15T の 6速は 14T に無い高さ（右外に出す）
+    x6t = fx(reduction(15, 6))
+    s.append(f'<line x1="{x6t:.1f}" y1="{T+68}" x2="{W-R+16:.1f}" y2="{T+68}" '
+             f'stroke="{C15_6}" stroke-width="1" stroke-dasharray="3 3"/>')
+    s.append(_txt(W - R + 20, T + 64, '14T に無い', 11, C15_6))
+    s.append(_txt(W - R + 20, T + 78, '高さ', 11, C15_6))
+
+    # 15T5速 ≒ 14T6速
+    x5, x6 = fx(reduction(15, 5)), fx(reduction(14, 6))
+    ym = T + 122
+    s.append(f'<path d="M{x6:.1f},{T+29} L{x6:.1f},{ym} M{x5:.1f},{T+81} L{x5:.1f},{ym}" '
+             f'stroke="{C_TX}" stroke-width="1.2"/>')
+    s.append(f'<line x1="{x6:.1f}" y1="{ym}" x2="{x5:.1f}" y2="{ym}" '
+             f'stroke="{C_TX}" stroke-width="1.2"/>')
+    cx = (x5 + x6) / 2
+    s.append(_txt(cx, ym + 20, '15T 5速 は 14T 6速 の 4.8% ロー', 12.5, anchor='middle',
+                  weight='600'))
+    s.append(_txt(cx, ym + 38, '＝ 14T 6速 の仕事をそのまま引き受ける', 11.5, anchor='middle'))
+    s.append('</svg>')
+    open(path, 'w', encoding='utf-8').write('\n'.join(s))
+
+
+def make_figures(outdir='docs'):
+    import os
+    os.makedirs(outdir, exist_ok=True)
+    fig_power(f'{outdir}/fig1-power.svg')
+    fig_window(f'{outdir}/fig2-window.svg')
+    fig_ladder(f'{outdir}/fig3-ladder.svg')
+    print(f'{outdir}/fig1-power.svg\n{outdir}/fig2-window.svg\n{outdir}/fig3-ladder.svg')
+
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--verify', action='store_true', help='実測突合のみ')
+    ap.add_argument('--svg', action='store_true', help='docs/ に SVG 図を生成')
     a = ap.parse_args()
-    if a.verify:
+    if a.svg:
+        make_figures()
+    elif a.verify:
         verify()
     else:
         table_ladder(); table_surplus(); table_window()

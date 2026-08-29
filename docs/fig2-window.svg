@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" width="760" height="280" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>6速の実用窓</title>
+<line x1="96.0" y1="36" x2="96.0" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="96.0" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">50</text>
+<line x1="163.3" y1="36" x2="163.3" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="163.3" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">60</text>
+<line x1="230.6" y1="36" x2="230.6" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="230.6" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">70</text>
+<line x1="297.9" y1="36" x2="297.9" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="297.9" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">80</text>
+<line x1="365.2" y1="36" x2="365.2" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="365.2" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">90</text>
+<line x1="432.5" y1="36" x2="432.5" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="432.5" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">100</text>
+<line x1="499.8" y1="36" x2="499.8" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="499.8" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">110</text>
+<line x1="567.1" y1="36" x2="567.1" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="567.1" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">120</text>
+<line x1="634.4" y1="36" x2="634.4" y2="196" stroke="#808a94" stroke-width="1" opacity="0.22"/>
+<text x="634.4" y="28.0" font-size="12" fill="#767f89" text-anchor="middle" font-weight="normal">130</text>
+<text x="378.6" y="12.0" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="normal">車速 [km/h]</text>
+<rect x="163.5" y="58" width="403.6" height="26" rx="4" fill="#3b82c4" opacity="0.82"/>
+<text x="84.0" y="76.0" font-size="13" fill="#3b82c4" text-anchor="end" font-weight="600">14T 6速</text>
+<text x="577.1" y="76.0" font-size="12" fill="#767f89" text-anchor="start" font-weight="normal">60–120（幅 60）</text>
+<rect x="192.3" y="102" width="309.1" height="26" rx="4" fill="#e07b39" opacity="0.82"/>
+<text x="84.0" y="120.0" font-size="13" fill="#e07b39" text-anchor="end" font-weight="600">15T 6速</text>
+<text x="511.4" y="120.0" font-size="12" fill="#767f89" text-anchor="start" font-weight="normal">64–110（幅 46）</text>
+<rect x="144.8" y="146" width="440.7" height="26" rx="4" fill="#2fa363" opacity="0.82"/>
+<text x="84.0" y="164.0" font-size="13" fill="#2fa363" text-anchor="end" font-weight="600">15T 5速</text>
+<text x="595.6" y="164.0" font-size="12" fill="#767f89" text-anchor="start" font-weight="normal">57–123（幅 65）</text>
+<line x1="163.3" y1="48" x2="163.3" y2="196" stroke="#767f89" stroke-width="1" stroke-dasharray="3 3"/>
+<line x1="567.1" y1="48" x2="567.1" y2="196" stroke="#767f89" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="163.3" y="212.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">下端は回転数で決まる</text>
+<text x="163.3" y="228.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">（3,900rpm に達する車速）</text>
+<text x="567.1" y="212.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">上端は出力で決まる</text>
+<text x="567.1" y="228.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">（余力が 3.9kW を切る車速）</text>
+</svg>
