@@ -410,82 +410,67 @@ def fig_ladder(path):
 
 
 def fig_ranges(path):
-    """各段が受け持てる車速範囲。14T と 15T を段ごとに対比する。"""
-    W, H = 760, 492
-    L, R, T = 66, 110, 54
-    x0, x1 = 0, 155
-    ISO = (5000, 6000, 7000, 8000, 9000)   # 等回転数線
-    C14D, C15D = '#2a6ba3', '#b3611f'      # 線は棒より濃い同系色
+    """各段が受け持てる範囲を 車速×回転数 の平面に斜めのバーで描く。"""
+    W, H = 760, 516
+    L, R, T, B = 62, 116, 30, 74
+    x0, x1, y0, y1 = 0, 155, 2600, 10800
     fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)
+    fy = lambda r: H - B - (r - y0) / (y1 - y0) * (H - T - B)
     ref = state(120, 14, 6)[2]
+    SHIFT = 9000
 
-    def win(f, n):
+    def seg(f, n):
         lo = v_at(LUG_RPM, f, n)
-        rev, pw = v_at(9000, f, n), top_of_range(f, n, ref)
-        return lo, min(rev, pw), rev, pw < rev
+        rev, pw = v_at(SHIFT, f, n), top_of_range(f, n, ref)
+        hi = min(rev, pw)
+        return lo, hi, rpm_at(hi, f, n), pw < rev, rev
 
-    s = [_hdr(W, H, '各段が受け持てる車速範囲')]
+    s = [_hdr(W, H, '各段が受け持てる車速と回転数')]
     for v in range(0, 156, 20):
-        s.append(f'<line x1="{fx(v):.1f}" y1="{T-14}" x2="{fx(v):.1f}" y2="{T+6*54-16}" '
+        s.append(f'<line x1="{fx(v):.1f}" y1="{T}" x2="{fx(v):.1f}" y2="{H-B}" '
                  f'stroke="{C_GR}" stroke-width="1" opacity="0.2"/>')
-        s.append(_txt(fx(v), T - 22, f'{v}', 11.5, anchor='middle'))
-    s.append(_txt((L + W - R) / 2, T - 40, '車速 [km/h]', 12.5, anchor='middle'))
+        s.append(_txt(fx(v), H - B + 18, f'{v}', 11.5, anchor='middle'))
+    s.append(_txt((L + W - R) / 2, H - B + 38, '車速 [km/h]', 12.5, anchor='middle'))
+    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12.5" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 15 {(T+H-B)/2:.0f})">'
+             f'エンジン回転数 [rpm]</text>')
+    for r in range(3000, 10001, 1000):
+        s.append(f'<line x1="{L}" y1="{fy(r):.1f}" x2="{W-R}" y2="{fy(r):.1f}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.2"/>')
+        s.append(_txt(L - 8, fy(r) + 4, f'{r//1000},000', 11, anchor='end'))
 
-    # 凡例（下端）
-    ly = H - 42
-    s.append(f'<rect x="{L}" y="{ly-9}" width="22" height="11" rx="2" fill="{C_TX}" '
-             f'opacity="0.75"/>')
-    s.append(_txt(L + 28, ly, '実用範囲', 11.5))
-    s.append(f'<rect x="{L+92}" y="{ly-9}" width="22" height="11" rx="2" fill="{C_TX}" '
-             f'opacity="0.2" stroke="{C_TX}" stroke-width="0.8" stroke-dasharray="2 2"/>')
-    s.append(_txt(L + 120, ly, '回転数では届くが出力が足りない', 11.5))
-    s.append(f'<circle cx="{L+330}" cy="{ly-3.5}" r="4" fill="{C_TX}"/>')
-    s.append(_txt(L + 340, ly, '出力で頭打ち', 11.5))
+    for r, lab in ((LUG_RPM, '3,900　実用下限'), (8000, '8,000　最大トルク'),
+                   (SHIFT, '9,000　最高出力'), (REV_LIMIT, '10,500　レブ（想定）')):
+        s.append(f'<line x1="{L}" y1="{fy(r):.1f}" x2="{W-R}" y2="{fy(r):.1f}" '
+                 f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="4 3" opacity="0.75"/>')
+        s.append(_txt(W - R + 6, fy(r) + 4, lab, 10.5))
 
     for n in GEAR:
-        yb = T + (n - 1) * 54
-        s.append(_txt(L - 14, yb + 22, f'{n}速', 13, anchor='end', weight='600'))
-        for j, f in enumerate((14, 15)):
+        for f in (14, 15):
             col = C14 if f == 14 else C15_6
-            lo, hi, rev, plim = win(f, n)
-            y = yb + j * 20
-            if plim:   # 回転では届く領域を淡色で
-                s.append(f'<rect x="{fx(hi):.1f}" y="{y}" width="{fx(rev)-fx(hi):.1f}" '
-                         f'height="15" rx="2" fill="{col}" opacity="0.16" stroke="{col}" '
-                         f'stroke-width="0.8" stroke-dasharray="2 2"/>')
-            s.append(f'<rect x="{fx(lo):.1f}" y="{y}" width="{fx(hi)-fx(lo):.1f}" '
-                     f'height="15" rx="2.5" fill="{col}" opacity="0.85"/>')
+            lo, hi, rhi, plim, rev = seg(f, n)
             if plim:
-                s.append(f'<circle cx="{fx(hi):.1f}" cy="{y+7.5}" r="4.2" fill="{col}" '
-                         f'stroke="#ffffff" stroke-width="1"/>')
-            s.append(_txt(fx(lo) - 5, y + 12, f'{f}T', 10.5, col, anchor='end'))
-        wa = win(14, n)[1] - win(14, n)[0]
-        wb = win(15, n)[1] - win(15, n)[0]
-        s.append(_txt(W - R + 12, yb + 15, f'{wa:.0f} → {wb:.0f} km/h', 11.5))
-        d = (wb / wa - 1) * 100
-        s.append(_txt(W - R + 12, yb + 30, f'{d:+.0f}%', 12.5,
-                      C15_6 if d < 0 else C_TX, weight='600'))
-    # 等回転数線（各段で同じ回転数になる車速を結ぶ）
-    for j, f in enumerate((14, 15)):
-        col = C14D if f == 14 else C15D
-        for r in ISO:
-            pts = [(fx(v_at(r, f, n)), T + (n - 1) * 54 + j * 20 + 7.5)
-                   for n in GEAR if v_at(r, f, n) <= x1]
-            if len(pts) > 1:
-                s.append(_path(pts, col, 0.9, op=0.6))
-    # 6速の下に回転数の目盛りを置く
-    yl = T + 5 * 54 + 20 + 15
-    for r in ISO:
-        x = fx(v_at(r, 15, 6))
-        if x > W - R: continue
-        s.append(f'<line x1="{x:.1f}" y1="{yl}" x2="{x:.1f}" y2="{yl+6}" '
-                 f'stroke="{C15D}" stroke-width="1.1"/>')
-        s.append(_txt(x, yl + 19, f'{r//1000},{r%1000:03d}', 10.5, anchor='middle'))
-    s.append(_txt(fx(v_at(9000, 15, 6)) + 14, yl + 19, 'rpm', 10.5))
-    s.append(_txt(L, yl + 19, '等回転数線', 11, weight='600'))
+                s.append(_path([(fx(hi), fy(rhi)), (fx(rev), fy(SHIFT))], col, 2.0,
+                               dash='3 3', op=0.55))
+            s.append(f'<line x1="{fx(lo):.1f}" y1="{fy(LUG_RPM):.1f}" '
+                     f'x2="{fx(hi):.1f}" y2="{fy(rhi):.1f}" stroke="{col}" '
+                     f'stroke-width="6" stroke-linecap="round" opacity="0.9"/>')
+            if plim:
+                s.append(f'<circle cx="{fx(hi):.1f}" cy="{fy(rhi):.1f}" r="4.5" '
+                         f'fill="{col}" stroke="#ffffff" stroke-width="1.2"/>')
+        xm = (v_at(LUG_RPM, 14, n) + v_at(LUG_RPM, 15, n)) / 2
+        yl = fy(LUG_RPM) + (20 if n % 2 else 38)
+        s.append(f'<line x1="{fx(xm):.1f}" y1="{fy(LUG_RPM)+4:.1f}" x2="{fx(xm):.1f}" '
+                 f'y2="{yl-10:.1f}" stroke="{C_TX}" stroke-width="0.8" opacity="0.5"/>')
+        s.append(_txt(fx(xm), yl, f'{n}速', 12.5, anchor='middle', weight='600'))
 
-    s.append(_txt(L, H - 16,
-                  '下限は 3,900rpm、上限は 9,000rpm と余力条件（3.9kW）の厳しい方', 11))
+    for i, (col, lab) in enumerate(((C14, '14T'), (C15_6, '15T'))):
+        y = T + 26 + i * 20
+        s.append(f'<line x1="{L+14:.0f}" y1="{y}" x2="{L+40:.0f}" y2="{y}" '
+                 f'stroke="{col}" stroke-width="6" stroke-linecap="round"/>')
+        s.append(_txt(L + 48, y + 4, lab, 12.5, col, weight='600'))
+    s.append(_txt(L + 14, T + 64, '破線＝回転数はまだ残っているが出力が足りない区間', 11))
+    s.append(_txt(L + 14, T + 80, '●＝出力で頭打ちになる点', 11))
     s.append('</svg>')
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
 
