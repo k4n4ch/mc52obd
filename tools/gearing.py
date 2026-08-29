@@ -219,11 +219,12 @@ def _txt(x, y, s, size=12, fill=None, anchor='start', weight='normal'):
             f'text-anchor="{anchor}" font-weight="{weight}">{s}</text>')
 
 
-def _path(pts, color, width=2.0, dash=None):
+def _path(pts, color, width=2.0, dash=None, op=1.0):
     d = 'M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in pts)
     da = f' stroke-dasharray="{dash}"' if dash else ''
+    oa = f' stroke-opacity="{op}"' if op != 1.0 else ''
     return (f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{width}"'
-            f' stroke-linejoin="round" stroke-linecap="round"{da}/>')
+            f' stroke-linejoin="round" stroke-linecap="round"{da}{oa}/>')
 
 
 def fig_power(path):
@@ -410,9 +411,11 @@ def fig_ladder(path):
 
 def fig_ranges(path):
     """各段が受け持てる車速範囲。14T と 15T を段ごとに対比する。"""
-    W, H = 760, 456
+    W, H = 760, 492
     L, R, T = 66, 110, 54
     x0, x1 = 0, 155
+    ISO = (5000, 6000, 7000, 8000, 9000)   # 等回転数線
+    C14D, C15D = '#2a6ba3', '#b3611f'      # 線は棒より濃い同系色
     fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R)
     ref = state(120, 14, 6)[2]
 
@@ -429,7 +432,7 @@ def fig_ranges(path):
     s.append(_txt((L + W - R) / 2, T - 40, '車速 [km/h]', 12.5, anchor='middle'))
 
     # 凡例（下端）
-    ly = H - 44
+    ly = H - 42
     s.append(f'<rect x="{L}" y="{ly-9}" width="22" height="11" rx="2" fill="{C_TX}" '
              f'opacity="0.75"/>')
     s.append(_txt(L + 28, ly, '実用範囲', 11.5))
@@ -462,6 +465,25 @@ def fig_ranges(path):
         d = (wb / wa - 1) * 100
         s.append(_txt(W - R + 12, yb + 30, f'{d:+.0f}%', 12.5,
                       C15_6 if d < 0 else C_TX, weight='600'))
+    # 等回転数線（各段で同じ回転数になる車速を結ぶ）
+    for j, f in enumerate((14, 15)):
+        col = C14D if f == 14 else C15D
+        for r in ISO:
+            pts = [(fx(v_at(r, f, n)), T + (n - 1) * 54 + j * 20 + 7.5)
+                   for n in GEAR if v_at(r, f, n) <= x1]
+            if len(pts) > 1:
+                s.append(_path(pts, col, 0.9, op=0.6))
+    # 6速の下に回転数の目盛りを置く
+    yl = T + 5 * 54 + 20 + 15
+    for r in ISO:
+        x = fx(v_at(r, 15, 6))
+        if x > W - R: continue
+        s.append(f'<line x1="{x:.1f}" y1="{yl}" x2="{x:.1f}" y2="{yl+6}" '
+                 f'stroke="{C15D}" stroke-width="1.1"/>')
+        s.append(_txt(x, yl + 19, f'{r//1000},{r%1000:03d}', 10.5, anchor='middle'))
+    s.append(_txt(fx(v_at(9000, 15, 6)) + 14, yl + 19, 'rpm', 10.5))
+    s.append(_txt(L, yl + 19, '等回転数線', 11, weight='600'))
+
     s.append(_txt(L, H - 16,
                   '下限は 3,900rpm、上限は 9,000rpm と余力条件（3.9kW）の厳しい方', 11))
     s.append('</svg>')
