@@ -118,7 +118,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831b';
+const VERSION = 'v20260831c';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -519,6 +519,130 @@ const SPD_STEPS = [20, 40, 60, 80];        // 太さの区切り [km/h]
 const SPD_W = [2, 3, 4.5, 6, 7.5];         // 対応する線幅 [px]
 const spdClass = v => v == null ? 0 : SPD_STEPS.filter(s => v >= s).length;   // 補正後の車速で区分する
 
+/* ══ 測位を捨てた区間を道路形状で埋める ═══════════════════════
+ * 端点の座標と進行方位を OSRM に渡して経路を引き、OBD 車速の積分で距離を
+ * 時間に配分する。**トンネルの同定は不要**で、端点と方位さえあれば経路は
+ * 一意に決まる（FL4 の設計判断をそのまま採る。市街地の高架下など、測位が
+ * 壊れる場面すべてに同じ処理が使える）。
+ *
+ * 進行方位で拘束するのが要点。拘束しないと分離帯のある道路で反対車線に
+ * スナップし、次の IC まで行って折り返す経路が返る（FL4 実測 +182%）。
+ *
+ * 合否は「経路長と車速積分の一致」で見る。両者は独立に得た量なので、
+ * 一致すれば経路が正しいことの裏付けになる。落ちた区間は線を引かない。
+ *
+ * **座標が外部サービス（OSRM 公開サーバ）へ送られる。** 走行の位置情報を
+ * 第三者に渡すことになるので、嫌なら OSRM_ON を false にする。 */
+const OSRM_ON = true;
+const OSRM_SERVER = 'https://router.project-osrm.org';
+const FILL_MIN_M = 100;    // これ未満の空白は埋めない
+const FILL_TOL_PCT = 8;    // 経路長と車速積分の許容乖離
+const FILL_STEP_M = 25;    // 出力する点の間隔
+const FILL_VVALID = [8, 140];   // 走行として成立する平均速度 [km/h]
+
+let fills = [];            // {pts:[[lat,lon]...], km, errPct} 検証を通ったものだけ
+
+const bearingDeg = (a, b) => {
+  const y = (b.lon - a.lon) * Math.cos(a.lat * Math.PI / 180);
+  return (Math.atan2(y, b.lat - a.lat) * 180 / Math.PI + 360) % 360;
+};
+
+async function routeBetween(a, b, brgA, brgB) {
+  const u = `${OSRM_SERVER}/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}`
+          + `?overview=full&geometries=geojson&bearings=${Math.round(brgA)},45;`
+          + `${Math.round(brgB)},45&radiuses=50;50`;
+  const j = await (await fetch(u)).json();
+  if (j.code !== 'Ok' || !j.routes || !j.routes.length) return {ok:false, reason:'OSRM: ' + j.code};
+  const pts = j.routes[0].geometry.coordinates.map(c => ({lat:c[1], lon:c[0]}));
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++)
+    cum.push(cum[i-1] + havM(pts[i-1].lat, pts[i-1].lon, pts[i].lat, pts[i].lon));
+  return {ok:true, pts, cum, length:cum[cum.length-1]};
+}
+
+function alongRoute(rt, s) {
+  const {pts, cum} = rt;
+  if (s <= 0) return pts[0];
+  if (s >= cum[cum.length-1]) return pts[pts.length-1];
+  let lo = 0, hi = cum.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; }
+  const w = (s - cum[lo]) / (cum[hi] - cum[lo]);
+  return {lat: pts[lo].lat + (pts[hi].lat - pts[lo].lat) * w,
+          lon: pts[lo].lon + (pts[hi].lon - pts[lo].lon) * w};
+}
+
+/** 車速を台形則で積分。OBD 自身の欠測も内挿で埋める（飛ばすと距離が抜ける）。 */
+function integrateDistance(t0, t1) {
+  const s = rows.filter(r => r.t >= t0 && r.t <= t1 && r.spd != null);
+  if (s.length < 2) return null;
+  const out = [{t: s[0].t, d: 0}];
+  let d = 0;
+  for (let i = 1; i < s.length; i++) {
+    const dt = s[i].t - s[i-1].t;
+    if (dt <= 0 || dt > 30) continue;
+    const v0 = (s[i-1].spd + 0.5) * speedCorr(), v1 = (s[i].spd + 0.5) * speedCorr();
+    d += (v0 + v1) / 2 / 3.6 * dt;
+    out.push({t: s[i].t, d});
+  }
+  return {series: out, total: d};
+}
+
+/** 測位を捨てた区間の一覧。両端は生き残った測位。 */
+function findFillGaps() {
+  const fix = [];
+  for (let i = 0; i < rows.length; i++) if (rows[i].lat != null) fix.push(i);
+  const out = [];
+  for (let k = 1; k < fix.length; k++) {
+    const a = fix[k-1], b = fix[k];
+    if (rows[b].t - rows[a].t < GPS_BREAK_S) continue;
+    out.push({a, b, ka: k-1, kb: k, fix});
+  }
+  return out;
+}
+
+async function fillGaps() {
+  fills = [];
+  if (!OSRM_ON) return;
+  const gaps = findFillGaps();
+  if (!gaps.length) return;
+  const notes = [];
+  for (const g of gaps) {
+    const A = rows[g.a], B = rows[g.b], T = B.t - A.t;
+    // 方位は少し離れた点から取る。直前直後だと雑音で向きが定まらない
+    const pa = rows[g.fix[Math.max(0, g.ka - 5)]], pb = rows[g.fix[Math.min(g.fix.length-1, g.kb + 5)]];
+    try {
+      const rt = await routeBetween(A, B, bearingDeg(pa, A), bearingDeg(B, pb));
+      if (!rt.ok) { notes.push(rt.reason); continue; }
+      if (rt.length < FILL_MIN_M) continue;
+      const vAvg = rt.length / T * 3.6;
+      if (vAvg < FILL_VVALID[0] || vAvg > FILL_VVALID[1]) {
+        notes.push(`経路 ${(rt.length/1000).toFixed(2)}km を ${T.toFixed(0)}s で走る想定になり平均 ${vAvg.toFixed(0)}km/h`);
+        continue;
+      }
+      const d = integrateDistance(A.t, B.t);
+      if (!d || d.total < FILL_MIN_M) { notes.push('車速の積分が取れない'); continue; }
+      const errPct = (d.total - rt.length) / rt.length * 100;
+      if (Math.abs(errPct) > FILL_TOL_PCT) {
+        notes.push(`経路長 ${(rt.length/1000).toFixed(2)}km と車速積分 ${(d.total/1000).toFixed(2)}km が ${errPct.toFixed(1)}% 乖離`);
+        continue;
+      }
+      // 累積距離を経路長へ正規化して並べる
+      const k = rt.length / d.total, pts = [];
+      let last = -1e9;
+      for (const q of d.series) {
+        const s = q.d * k;
+        if (s - last < FILL_STEP_M) continue;
+        const p = alongRoute(rt, s);
+        pts.push([p.lat, p.lon]); last = s;
+      }
+      pts.unshift([A.lat, A.lon]); pts.push([B.lat, B.lon]);
+      fills.push({pts, km: rt.length/1000, errPct});
+    } catch (e) { notes.push('経路探索に失敗: ' + e.message); }
+    await new Promise(r => setTimeout(r, 300));   // 公開サーバなので間隔を空ける
+  }
+  fills.notes = notes;
+}
+
 function drawMap() {
   const pts = rows.filter(r => r.lat != null && r.lon != null);
   // Leaflet は CDN 依存。読めなくてもチャート側は成立させたいので、
@@ -586,6 +710,16 @@ function drawMap() {
       weight:w, opacity: dim ? .18 : 1, dashArray: dash,
       lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(layer);
   }
+
+  /* 測位を捨てた区間の補完。実測と同じ太さ・同じ線種にすると区別が付かないので、
+   * **長い破線**にして「推定である」ことを線種で示す。色はギヤ不明と同じ灰。 */
+  for (const f of fills) {
+    if (f.pts.length < 2) continue;
+    L.polyline(f.pts, {color:casing, weight:5, opacity:.8, dashArray:'9,7',
+      lineCap:'butt', lineJoin:'round', interactive:false}).addTo(layer);
+    L.polyline(f.pts, {color:css('--gx'), weight:2.5, opacity:.95, dashArray:'9,7',
+      lineCap:'butt', lineJoin:'round', interactive:false}).addTo(layer);
+  }
   marker.addTo(layer);
   // 抜き出しの切り替えで視点が戻らないよう、最初の描画時だけ範囲を合わせる
   if (!drawMap._fitted) {
@@ -613,6 +747,7 @@ function addLegend() {
       <div class="row" style="margin-top:.25rem">
       <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="3,4"/></svg><span>半クラ・シフト</span>
       <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="1,4"/></svg><span>低速</span></div>
+      <div class="row"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="9,7"/></svg><span>測位途絶の補完（推定）</span></div>
       <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
     L.DomEvent.disableClickPropagation(d);
     d.querySelectorAll('.gsel').forEach(el => {
@@ -846,6 +981,18 @@ function refresh() {
     + (rows.badFixes ? ` / 精度不良で除外 ${rows.badFixes} 点` : '');
 }
 
+/** 補完の結果を状態行へ足す。落ちた区間は理由ごと出す（黙って消さない）。 */
+function statFills(base) {
+  const n = fills.length;
+  const ng = (fills.notes || []).length;
+  const km = fills.reduce((a, f) => a + f.km, 0);
+  const err = n ? Math.max(...fills.map(f => Math.abs(f.errPct))) : 0;
+  $('stat').textContent = base
+    + (n ? ` / 途絶を補完 ${n} 区間 ${km.toFixed(2)}km（乖離 最大 ${err.toFixed(1)}%）` : '')
+    + (ng ? ` / 補完できず ${ng} 区間` : '');
+  if (ng) console.warn('[補完できず]', fills.notes);
+}
+
 $('file').onchange = e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -862,6 +1009,14 @@ $('file').onchange = e => {
       showKDiag();
       buildCharts();
       refresh();
+      // 経路探索は外部サービスなので、地図を出してから非同期で足す。
+      // 失敗しても既に描いたものは残る
+      const base = $('stat').textContent;
+      if (findFillGaps().length) {
+        $('stat').textContent = base + ' / 測位途絶を補完中…';
+        fillGaps().then(() => { drawMap(); statFills(base); })
+                  .catch(e => { $('stat').textContent = base + ' / 補完に失敗: ' + e.message; });
+      }
     } catch (err) {
       $('stat').textContent = '読み込み失敗: ' + err.message;
     }
