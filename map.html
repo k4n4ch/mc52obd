@@ -55,6 +55,14 @@ button:disabled{opacity:.35}
 #ver{color:var(--dim); font-size:.68rem; opacity:.65; white-space:nowrap}
 #cur{color:var(--warn); font-size:.72rem; white-space:nowrap; font-variant-numeric:tabular-nums}
 
+/* ── 再生バー ── */
+#play{flex:0 0 auto; display:flex; flex-wrap:wrap; gap:.4rem; align-items:center;
+      padding:.35rem .6rem; background:var(--panel); border-bottom:1px solid var(--line)}
+#play button{padding:.28rem .5rem}
+#pSpd{display:flex; gap:.25rem; margin-left:.4rem}
+#pSpd button{padding:.28rem .42rem; font-size:.7rem; color:var(--dim)}
+#pSpd button.on{color:var(--fg); background:#25303f; border-color:var(--accent)}
+
 /* ── 本体 ── */
 #wrap{flex:1 1 auto; display:flex; min-height:0}
 #map{flex:1 1 60%; min-height:0; background:#1a1a19}
@@ -114,6 +122,13 @@ button:disabled{opacity:.35}
   <span id="ver"></span>
 </div>
 
+<div id="play">
+  <button id="pPlay" disabled title="再生 / 一時停止">▶</button>
+  <button id="pBack" disabled title="5 秒戻す">⏪ 5s</button>
+  <button id="pFwd" disabled title="10 秒送る">10s ⏩</button>
+  <span id="pSpd"></span>
+</div>
+
 <div id="wrap">
   <div id="map"><div id="empty">アプリが書き出した CSV を読み込むと、<br>経路と時系列を表示する</div></div>
   <div id="side"></div>
@@ -122,7 +137,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831h';
+const VERSION = 'v20260831i';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -861,18 +876,14 @@ function drawCharts() {
   for (const s of SERIES) drawChart(s);
 }
 
-function drawChart(s) {
-  // キャンバスが未生成のうちに refresh() が走ることがある（丁数の自動推定が
-  // buildCharts より前に refresh を呼ぶ経路があった）。例外にすると読み込み
-  // 処理ごと中断してチャートが 1 枚も出なくなるので、ここで黙って戻る
-  if (!s.canvas) return;
-  const cv = s.canvas, dpr = devicePixelRatio || 1;
-  const w = cv.clientWidth, h = cv.clientHeight;
-  if (!w || !h) return;
-  cv.width = w * dpr; cv.height = h * dpr;
-  const g = cv.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.clearRect(0, 0, w, h);
+/* 系列も目盛りも停車帯も、再生中は一切変わらない。毎フレーム全行をなぞると
+ * 6 枚 × 13,000 点で端末が持たないので、**カーソル以外をオフスクリーンへ
+ * 1 回だけ描いて使い回す**。データ・k・判定窓・丁数が変われば chartEpoch を
+ * 進めて捨てる。再生のためだけでなく、スクラブ操作も同じだけ軽くなる。 */
+let chartEpoch = 0;
+
+function buildChartBg(s, w, h, dpr) {
+  s.bg = null; s.X = null;
   if (!rows.length) return;
 
   const vals = rows.map(r => r[s.key]);
@@ -888,6 +899,11 @@ function drawChart(s) {
   const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
   const X = t => 30 + (w - 36) * ((t - t0) / (t1 - t0 || 1));
   const Y = v => h - 12 - (h - 20) * ((v - lo) / (hi - lo));
+
+  const cv = document.createElement('canvas');
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   // 停車区間の帯。停車は「判定できない」のではなく「判定する対象が無い」ので、
   // 判定不能とは別に示す。ベタ塗りだと下のデータを隠すのでハッチにする
@@ -958,15 +974,36 @@ function drawChart(s) {
   g.lineWidth = 1; g.setLineDash([2, 3]); g.stroke(dashed);
   g.setLineDash([]);
 
-  // カーソル
-  if (cursor >= 0 && cursor < rows.length) {
-    const x = X(rows[cursor].t);
+  s.bg = cv; s.X = X; s.Y = Y;
+}
+
+function drawChart(s) {
+  // キャンバスが未生成のうちに refresh() が走ることがある（丁数の自動推定が
+  // buildCharts より前に refresh を呼ぶ経路があった）。例外にすると読み込み
+  // 処理ごと中断してチャートが 1 枚も出なくなるので、ここで黙って戻る
+  if (!s.canvas) return;
+  const cv = s.canvas, dpr = devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  const key = w + '|' + h + '|' + dpr + '|' + chartEpoch;
+  if (s.bgKey !== key) { buildChartBg(s, w, h, dpr); s.bgKey = key; }
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  const g = cv.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, cv.width, cv.height);
+  if (!s.bg) return;
+  g.drawImage(s.bg, 0, 0);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // 毎フレーム描き直すのはカーソルだけ
+  if (cursor >= 0 && cursor < rows.length && s.X) {
+    const x = s.X(rows[cursor].t);
     g.strokeStyle = css('--warn'); g.lineWidth = 1;
     g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 6); g.stroke();
     const v = rows[cursor][s.key];
     if (v != null) {
       g.fillStyle = css('--warn');
-      g.beginPath(); g.arc(x, Y(v), 3, 0, 7); g.fill();
+      g.beginPath(); g.arc(x, s.Y(v), 3, 0, 7); g.fill();
     }
   }
 }
@@ -1020,6 +1057,59 @@ function bindCursor(cv) {
   });
 }
 
+/* ══ 再生 ═══════════════════════════════════════════════════
+ * カーソルを時間で進めるだけ。地図・数値・チャートの同期は setCursor が
+ * 既に持っているので、ここは「時刻を進めて一番近い行を選ぶ」しかしない。
+ * チャートは背景をキャッシュしてあるので、毎フレームの描画はカーソル線だけ。 */
+const SPEEDS = [1, 2, 5, 10, 30];
+let playing = false, playSpeed = 1, playT = 0, lastRAF = 0;
+
+const tSpan = () => rows.length ? [rows[0].t, rows[rows.length - 1].t] : [0, 0];
+
+/** 時刻 t に最も近い行の番号。 */
+function idxAtT(t) {
+  if (!rows.length) return -1;
+  let lo = 0, hi = rows.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (rows[m].t <= t) lo = m; else hi = m; }
+  return (Math.abs(rows[lo].t - t) <= Math.abs(rows[hi].t - t)) ? lo : hi;
+}
+
+function setPlay(p) {
+  const [, t1] = tSpan();
+  playing = p && rows.length > 0;
+  if (playing && playT >= t1) playT = tSpan()[0];   // 終端で押したら頭から
+  lastRAF = 0;
+  $('pPlay').textContent = playing ? '❚❚' : '▶';
+}
+
+function seekTo(t) {
+  const [t0, t1] = tSpan();
+  playT = Math.max(t0, Math.min(t1, t));
+  setCursor(idxAtT(playT));
+}
+
+function playTick(ts) {
+  if (playing && rows.length) {
+    const [, t1] = tSpan();
+    if (lastRAF) playT += (ts - lastRAF) / 1000 * playSpeed;
+    lastRAF = ts;
+    if (playT >= t1) { playT = t1; setPlay(false); }
+    setCursor(idxAtT(playT));
+  }
+  requestAnimationFrame(playTick);
+}
+requestAnimationFrame(playTick);
+
+$('pPlay').onclick = () => setPlay(!playing);
+$('pBack').onclick = () => seekTo(playT - 5);
+$('pFwd').onclick  = () => seekTo(playT + 10);
+$('pSpd').innerHTML = SPEEDS.map(s =>
+  `<button data-s="${s}"${s === 1 ? ' class="on"' : ''}>${s}×</button>`).join('');
+$('pSpd').querySelectorAll('button').forEach(b => b.onclick = () => {
+  playSpeed = +b.dataset.s;
+  $('pSpd').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+});
+
 /** 経過秒を m:ss にする。区間を探すときに秒で言えないと照合できない。 */
 function mmss(sec) {
   const s = Math.max(0, Math.round(sec));
@@ -1029,7 +1119,10 @@ function mmss(sec) {
 function setCursor(i) {
   cursor = i;
   const r = i >= 0 ? rows[i] : null;
-  $('cur').textContent = r ? `t = ${mmss(r.t - rows[0].t)}（${r.t.toFixed(0)}s）` : '';
+  if (r) playT = r.t;                    // 手でなぞった位置から再生を続けられる
+  const [t0, t1] = tSpan();
+  $('cur').textContent = r
+    ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)}（${r.t.toFixed(0)}s）` : '';
   for (const s of SERIES) {
     const el = $('v_' + s.key);
     const v = r ? r[s.key] : null;
@@ -1060,6 +1153,7 @@ function showTable() {
 
 // ── 更新 ─────────────────────────────────────────────────
 function refresh() {
+  chartEpoch++;          // 系列が変わりうるので背景キャッシュを捨てる
   const tol = +$('tol').value;
   // 窓だけは判断の余地があるので走行画面と localStorage で共有する
   if (isFinite(tol) && tol > 0) localStorage.setItem('mc52_tol', String(tol));
@@ -1105,6 +1199,8 @@ $('file').onchange = e => {
       computeRatios();           // fitK は比を見るので先に用意する
       $('estsp').disabled = false;
       $('tbl').disabled = false;
+      for (const id of ['pPlay', 'pBack', 'pFwd']) $(id).disabled = false;
+      playT = rows[0].t; setPlay(false);
       showKDiag();
       // **丁数の自動推定より先にキャンバスを作る。** 推定は onSprk 経由で
       // refresh を呼ぶので、後に置くと描画対象が無いまま走る
