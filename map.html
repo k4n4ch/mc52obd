@@ -99,7 +99,7 @@ button:disabled{opacity:.35}
 
 <div id="bar">
   <input type="file" id="file" accept=".csv,text/csv">
-  <label>k <input type="number" id="k" step="0.001" value="1.013"></label>
+  <label>k <input type="number" id="k" step="0.0001" value="1.0057"></label>
   <label title="隣接する段の窓が重ならない上限まで。上限は諸元から算出している">窓±
     <input type="number" id="tol" step="0.5" min="0.5" value="4">% <span id="tolMax"></span></label>
   <label title="回転数を車速の取得時刻へ補間して揃える"><input type="checkbox" id="align" checked> 時刻補正</label>
@@ -119,7 +119,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260830e';
+const VERSION = 'v20260830f';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -339,10 +339,13 @@ function computeRatios() {
   for (const r of rows) {
     const rp = useAl && r.rpmAl != null ? r.rpmAl : r.rpmRaw;
     r.rpm = rp;
-    // 比は**生値**で取る。補正した値で取ると k ごとずれる
-    r.ratio = (rp > 500 && r.spd >= 8) ? rp / r.spd : null;
-    // 表示・線の太さの区分は補正後（真の車速）
-    r.spdTrue = r.spd == null ? null : r.spd * c;
+    /* `speed_obd` は四捨五入ではなく**切り捨て**なので、真値は +0.5 して扱う
+     * （2026-08-30 同定。段ごとの k のばらつきが 0.83% → 0.13% に潰れる）。
+     * 丁数補正は掛けない。掛けると k ごとずれる。 */
+    const sp = r.spd == null ? null : r.spd + 0.5;
+    r.ratio = (rp > 500 && sp >= 8.5) ? rp / sp : null;
+    // 表示・線の太さの区分は丁数補正後（真の車速）
+    r.spdTrue = sp == null ? null : sp * c;
   }
 }
 
@@ -362,7 +365,7 @@ function assignGears(k, tolPct) {
     }
     // `speed_obd` は 1km/h 刻みで、±0.5km/h の量子化誤差が比に 0.5/車速 で
     // 効く。低速ほど不利になるので、その不確かさを許容へ足す（ロガーと同じ式）。
-    if (bd <= tol + 0.5 / Math.max(r.spd, 1)) { r.gear = best; r.gstate = 'gear'; }
+    if (bd <= tol + 0.5 / Math.max(r.spd + 0.5, 1)) { r.gear = best; r.gstate = 'gear'; }
   }
 }
 

@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830e';
+const VERSION = 'v20260830f';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -229,7 +229,19 @@ const TIRE_CIRC = Math.PI * (17 * 25.4 + 2 * 150 * 0.60) / 1000;   // 後輪 150
 const R = {};
 for (const n in GEAR_RATIO) R[n] = PRIMARY * GEAR_RATIO[n] * SECONDARY / (TIRE_CIRC * 60 / 1000);
 
-let gearK   = parseFloat(localStorage.getItem('mc52_k'))   || 1.013;
+/* `0D` は四捨五入ではなく**切り捨て**（2026-08-30、3走行 13,153 行で同定）。
+ * 段ごとに k を独立に当てると生値では 2速1.0213〜6速1.0129 と単調にずれ、
+ * 車速へ +0.5 を戻すとばらつきが 0.83% → 0.13% に潰れる。これは低速ほど
+ * 比が高く出る切り捨ての症状そのもの。以後は真値を `0D + 0.5` として扱う。
+ * 旧 k=1.013 系はこの偏りを吸収した値なので、保存値ごと入れ替える。 */
+const SPD_HALF = 0.5;
+let gearK = parseFloat(localStorage.getItem('mc52_k'));
+if (localStorage.getItem('mc52_k_v') !== '2') {
+  gearK = 1.0057;
+  localStorage.setItem('mc52_k', '1.0057');
+  localStorage.setItem('mc52_k_v', '2');
+}
+if (!(gearK > 0.9 && gearK < 1.1)) gearK = 1.0057;
 
 /* ── 表示車速の補正 ────────────────────────────────────────
  * `0D` は ECU が**純正のスプロケット丁数を固定前提**にして換算した値なので、
@@ -273,7 +285,7 @@ const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴�
 /** 現在値からギヤを求める。判定できなければ null を返す。 */
 function currentGear() {
   if (V.rpm === null || V.spd === null || V.rpm < 500 || V.spd < MIN_GEAR_SPEED) return null;
-  const ratio = V.rpm / V.spd;
+  const ratio = V.rpm / (V.spd + SPD_HALF);
   let best = null, bd = Infinity;
   for (const n in R) {
     const d = Math.abs(ratio / (gearK * R[n]) - 1);
@@ -283,7 +295,7 @@ function currentGear() {
   // 効く（20km/h で 2.5%、50km/h で 1.0%）。低速ほど不利になるため、その
   // 不確かさをそのまま許容へ足す。実測 13,153 行で判定 93.7%→95.8%、
   // 飛び 0.14%→0.19%、複数段が窓に入る率 0.00%→0.03%。
-  return bd <= gearTol / 100 + 0.5 / V.spd ? best : null;
+  return bd <= gearTol / 100 + 0.5 / (V.spd + SPD_HALF) ? best : null;
 }
 
 // ── ログ ──────────────────────────────────────────────────
@@ -738,7 +750,7 @@ const RPM_MAX = 10500;   // CB250R のレッドゾーン手前まで。バーの
 function render() {
   setTxt('rpmv', V.rpm, 0);
   // 主表示は補正後（真の車速）。生値は副表示に併記する
-  setTxt('spdv', V.spd === null ? null : V.spd * speedCorr(), 0);
+  setTxt('spdv', V.spd === null ? null : (V.spd + SPD_HALF) * speedCorr(), 0);
   setTxt('thrv', V.thr, 0);
   setTxt('loadv', V.load, 0);
   setTxt('ectv', V.ect, 0);
@@ -763,8 +775,8 @@ function render() {
 
   // 判定の妥当性を走りながら見るため、比と使用中の k を併記する
   $('ratio').textContent = canRatio
-    ? '比 ' + (V.rpm / V.spd).toFixed(1) + ' / k ' + gearK.toFixed(3)
-    : 'k ' + gearK.toFixed(3);
+    ? '比 ' + (V.rpm / (V.spd + SPD_HALF)).toFixed(1) + ' / k ' + gearK.toFixed(4)
+    : 'k ' + gearK.toFixed(4);
 }
 
 function cls(id, c) {
