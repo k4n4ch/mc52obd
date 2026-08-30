@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830c';
+const VERSION = 'v20260830d';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -421,6 +421,12 @@ let pendingWait = null;   // 初期化中、特定文字列を待つ
 let awaiting = null;      // ポーリング応答待ちの PID。同時 1 要求を保証する
 let stallCount = 0;
 const STALL_LIMIT = 6;
+// 監視タイマが**まだ生きている要求を先取りして捨てる**と、遅れて届いた応答が
+// 次の要求に誤って割り当てられ、失敗が数周期にわたって連鎖する。実測（停車、
+// v20260830c）で行間隔が 0.52s と 1.7〜5.6s の二山になり、停滞側で miss が
+// 6〜23 に跳ねたのはこれ。好調時は 130ms/要求なので、1.5 秒は十分な猶予。
+const PREEMPT_MS = 1500;
+let awaitingSince = 0;
 
 function onRx(evt) {
   rxBuf += new TextDecoder().decode(evt.target.value);
@@ -652,13 +658,13 @@ let missTotal = 0, missAtLastRow = 0;
 let watchdog = null;
 
 function startPolling() {
-  polling = true; cycle = 0; fastIdx = 0; awaiting = null;
+  polling = true; cycle = 0; fastIdx = 0; awaiting = null; awaitingSince = 0;
   hits = misses = rateN = 0; rateT0 = performance.now();
   sendNextPid();
   watchdog = setInterval(() => {
     if (!polling || !connected) return;
-    if (awaiting !== null) {
-      // 応答が返らないまま次の点検を迎えた＝取りこぼし
+    if (awaiting !== null && performance.now() - awaitingSince >= PREEMPT_MS) {
+      // 猶予を過ぎても返らない＝本当に落ちた
       if (++stallCount >= STALL_LIMIT) {
         log('無応答が続く。再接続する', 'e');
         stallCount = 0;
@@ -698,6 +704,7 @@ function sendNextPid() {
     rateN++;   // 1 周 = 1 サンプル
   }
   awaiting = pid;
+  awaitingSince = performance.now();
   const cmd = '01' + pid.toString(16).padStart(2, '0').toUpperCase();
   setTimeout(() => {
     // 待っている間に監視タイマが先へ進めていたら、この要求は撃たない
