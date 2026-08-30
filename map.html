@@ -137,7 +137,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831i';
+const VERSION = 'v20260831j';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1028,6 +1028,11 @@ function bindCursor(cv) {
       if (d < bd) { bd = d; bi = i; }
     }
     setCursor(bi);
+    /* **再生位置は「手でなぞったとき」だけ更新する。** setCursor の中で更新すると、
+     * 再生ループが進めた playT を行の時刻へスナップして戻してしまう。行間隔が
+     * 0.73 秒あるので、1 倍速では 1 フレーム 0.017 秒しか進まず必ず同じ行に戻り、
+     * **再生が止まったまま**になる（v20260831i の不具合）。 */
+    playT = rows[bi].t;
   };
 
   cv.addEventListener('pointerdown', e => {
@@ -1119,7 +1124,6 @@ function mmss(sec) {
 function setCursor(i) {
   cursor = i;
   const r = i >= 0 ? rows[i] : null;
-  if (r) playT = r.t;                    // 手でなぞった位置から再生を続けられる
   const [t0, t1] = tSpan();
   $('cur').textContent = r
     ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)}（${r.t.toFixed(0)}s）` : '';
