@@ -118,7 +118,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260830g';
+const VERSION = 'v20260831a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -255,7 +255,7 @@ let cursor = -1;
 const COLS = {
   t:['t_sec'], rpm:['rpm','0C_rpm'], spd:['speed_obd','0D_speed'], skew:['skew_ms'],
   thr:['throttle','11_tps'], ect:['ect','05_ect'], volt:['volt','42_volt'],
-  lat:['lat'], lon:['lon'], gspd:['speed_gps'],
+  lat:['lat'], lon:['lon'], gspd:['speed_gps'], acc:['gps_acc'],
 };
 
 function parseCsv(text) {
@@ -277,12 +277,44 @@ function parseCsv(text) {
       t: num(a, pick.t) ?? i, rpm: num(a, pick.rpm), spd: num(a, pick.spd),
       thr: num(a, pick.thr), ect: num(a, pick.ect), volt: num(a, pick.volt),
       lat: num(a, pick.lat), lon: num(a, pick.lon), gspd: num(a, pick.gspd),
+      acc: num(a, pick.acc),
       skew: num(a, pick.skew),
     };
     out.push(r);
   }
+  dropBadFixes(out);
   alignRpm(out);
   return out;
+}
+
+/* ── 精度の悪い測位を捨てる ────────────────────────────────
+ * スマホの Geolocation はトンネル内でも測位を返し続けるが、精度半径が
+ * 数百 m に膨らんだ嘘の座標になる。実測（2026-08-30 の走行、6,511 点）:
+ *
+ *   通常時          精度 4〜10m
+ *   トンネル 7 箇所  精度 中央 200〜854m / 最大 1194m、各 10〜37 秒
+ *   出口での飛び     245〜806m が 15 件
+ *
+ * 地図では「道路から数百 m 外れて彷徨い、出口で線が飛ぶ」形で出る。
+ * 桁で分離できているので閾値で切れる。捨てた区間は線を繋がない
+ * （繋ぐと走っていない直線が描かれるため）。
+ *
+ * `speed_gps` も同じ測位から出ているので一緒に捨てる。丁数推定が
+ * Σ(GPS)/Σ(0D) を使っており、汚れた値が混ざると推定がずれる。 */
+const GPS_ACC_MAX = 50;    // [m] これを超える測位は使わない
+const GPS_BREAK_S = 5;     // [s] 測位がこれ以上空いたら線を切る
+
+function dropBadFixes(rows) {
+  let n = 0;
+  for (const r of rows) {
+    if (r.acc != null && r.acc > GPS_ACC_MAX) {
+      r.lat = r.lon = r.gspd = null;
+      r.badFix = true;
+      n++;
+    }
+  }
+  rows.badFixes = n;
+  return n;
 }
 
 /* ── 回転数を車速の取得時刻へ合わせる ──────────────────────
@@ -482,16 +514,20 @@ function drawMap() {
   // 同じ (ギヤ, 速度クラス) が続く区間をまとめて 1 本の polyline にする。
   // 1 点ごとに線を引くと数千本になって特に端末側で重い。
   const runs = [];
-  let cur = null;
+  let cur = null, prevT = null;
   for (const p of pts) {
+    // 測位が飛んでいる＝間に捨てた区間がある。ここで線を切る。繋ぐと
+    // 走っていない直線がトンネルを串刺しにして描かれる
+    const brk = prevT != null && p.t - prevT > GPS_BREAK_S;
     const key = (p.gear ?? p.gstate) + ':' + spdClass(p.spdTrue);
-    if (!cur || cur.key !== key) {
-      if (cur) { cur.pts.push([p.lat, p.lon]); }   // 境界点を共有して線を繋ぐ
+    if (!cur || cur.key !== key || brk) {
+      if (cur && !brk) { cur.pts.push([p.lat, p.lon]); }   // 境界点を共有して線を繋ぐ
       cur = {key, gear:p.gear, st:p.gstate, w:SPD_W[spdClass(p.spdTrue)], pts:[[p.lat, p.lon]]};
       runs.push(cur);
     } else {
       cur.pts.push([p.lat, p.lon]);
     }
+    prevT = p.t;
   }
   const casing = css('--casing');
   for (const run of runs) {
@@ -770,7 +806,8 @@ function refresh() {
   $('stat').textContent = `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
     + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`
     + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)')
-    + (speedCorr() !== 1 ? ` / 車速 ×${speedCorr().toFixed(4)}` : '');
+    + (speedCorr() !== 1 ? ` / 車速 ×${speedCorr().toFixed(4)}` : '')
+    + (rows.badFixes ? ` / 精度不良で除外 ${rows.badFixes} 点` : '');
 }
 
 $('file').onchange = e => {
