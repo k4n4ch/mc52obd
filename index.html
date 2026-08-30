@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830b';
+const VERSION = 'v20260830c';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -581,7 +581,7 @@ function parseObd(block, pid) {
 
 function handlePid(pid, block) {
   const data = parseObd(block, pid);
-  if (!data) { misses++; return; }
+  if (!data) { misses++; missTotal++; return; }
   hits++;
   const conv = PID[pid][1];
   const val = conv ? conv(data) : data.map(x => x.toString(16).padStart(2,'0').toUpperCase()).join('');
@@ -646,7 +646,9 @@ let hits = 0, misses = 0, rateT0 = 0, rateN = 0;
 // 実走の脱落 43% が停車（約 10%）で再現しないため、プロトコルが AUTO へ落ちて
 // いたのかを**ログ自体から**判定できるようにする。
 let sessionProto = '';
-let missAtLastRow = 0;
+// misses は 3 秒窓の表示用でリセットされる。行ごとの欠測数には使えないので
+// 累積カウンタを別に持つ。
+let missTotal = 0, missAtLastRow = 0;
 let watchdog = null;
 
 function startPolling() {
@@ -664,7 +666,7 @@ function startPolling() {
         return;
       }
       awaiting = null;
-      misses++;
+      misses++; missTotal++;
       sendNextPid();
     }
     const dt = (performance.now() - rateT0) / 1000;
@@ -809,6 +811,7 @@ function updateSpeedSub() {
 
 // ══ 記録 ═════════════════════════════════════════════════
 let recording = false;
+let bkTimer = null, bkSeq = 0;
 let obdRows = [];         // {t, rpm, spd, thr, load, ect, volt, fuelsys}
 let recT0 = 0;
 
@@ -821,19 +824,31 @@ function pushRow() {
     rpm: V.rpm, spd: V.spd, thr: V.thr,
     load: V.load, ect: V.ect, volt: V.volt, fuelsys: V.fuelsys,
     skew: VT.spd - VT.rpm,       // 車速と回転数の取得時刻差 [ms]
-    miss: misses - missAtLastRow,  // 前の行からこの行までに落ちた要求数
+    miss: missTotal - missAtLastRow,  // 前の行からこの行までに落ちた要求数
   });
-  missAtLastRow = misses;
+  missAtLastRow = missTotal;
 }
 
 function toggleRec() {
   recording = !recording;
   if (recording) {
     obdRows = []; gpsBuf = []; recT0 = Date.now();
-    missAtLastRow = misses;
+    missTotal = 0; missAtLastRow = 0;
+    // 停止を押すまで 1 バイトも保存されない作りなので、長時間の記録では
+    // タブが落ちると全部消える。30 分ごとに保険の写しを書き出しておく。
+    // 正常に停止できたときは通し 1 本が別に出るので、写しは捨ててよい。
+    bkSeq = 0;
+    clearInterval(bkTimer);
+    bkTimer = setInterval(() => {
+      if (!recording || !obdRows.length) return;
+      bkSeq++;
+      exportCsv('_bk' + bkSeq + '.csv');
+      log('保険の写しを保存 (' + bkSeq + ')', 'w');
+    }, 30 * 60 * 1000);
     if (gpsEnabled) startGps();
     log('記録開始', 'ok');
   } else {
+    clearInterval(bkTimer); bkTimer = null;
     log(`記録終了 OBD ${obdRows.length} 行 / GPS ${gpsBuf.length} 点`, 'ok');
     if (obdRows.length) exportCsv();
     if (gpsBuf.length) exportGpx();
@@ -860,7 +875,7 @@ function dl(text, mime, ext) {
 }
 
 // OBD と GPS を時刻で結合した解析用 CSV。ギヤ判定の較正はこれを使う。
-function exportCsv() {
+function exportCsv(ext) {
   // 末尾 5 列はビュワーが参照しない（列名で引く実装のため無視される）。
   // app/proto/p3/sprocket_f は先頭行だけ埋める。セッション定数なので全行に
   // 複製する意味が無く、後処理は 1 行目を読めばよい。
@@ -885,7 +900,7 @@ function exportCsv() {
       ri ? '' : p3Delay, ri ? '' : sprkFront,
     ].join(',');
   }).join('\n');
-  dl(head + body + '\n', 'text/csv', '.csv');
+  dl(head + body + '\n', 'text/csv', ext || '.csv');
 }
 
 const GPX_SEG_GAP = 10;   // 秒。これを超える間隔で trkseg を切る
