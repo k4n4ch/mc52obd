@@ -10,6 +10,11 @@ work/
 # results/ に残し、生の軌跡は private/ に置いてここで弾く。
 private/*
 !private/README.md
+
+# 例示用に切り出した区間も同じ扱い。速度は法定内に収めてあり日時もずらして
+# あるが、緯度経度はそのまま残るため公開はしない。公開するのはスクリーン
+# ショットだけにする（tools/cutlog.py と tools/shifttime.py で再生成できる）。
+samples/
 *.gpx
 *.kml
 *.kmz
