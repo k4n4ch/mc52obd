@@ -532,6 +532,101 @@ def fig_ranges(path):
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
 
 
+def fig_usage(path, logdir='private'):
+    """実走行の使用密度を 車速×回転数 の平面に重ねる。
+
+    理論のギア線図（fig4）と同じ平面に、実測がどこに落ちているかを描く。
+    ログは個人の移動履歴なのでリポジトリに含めない。無ければ図も作らない。
+    """
+    import csv, glob, os
+    files = sorted(glob.glob(os.path.join(logdir, 'mc52_*.csv')))
+    if not files:
+        print(f'  （{logdir}/mc52_*.csv が無いので使用密度図は作らない）')
+        return False
+
+    K, GF = 1.0057, 15 / 14        # ECU 生値→真値の補正と丁数補正
+    Rk = {n: PRIMARY * GEAR[n] * REAR / 14 / (CIRC * 60 / 1000) for n in GEAR}
+    def gear_of(rpm, spd):
+        if spd is None or rpm is None or spd < 8 or rpm < 500: return None
+        s = spd + 0.5
+        best, bd = None, 9
+        for n in Rk:
+            d = abs(rpm / s / (K * Rk[n]) - 1)
+            if d < bd: bd, best = d, n
+        return best if bd <= 0.04 + 0.5 / s else None
+
+    DV, DR = 2.5, 200              # セルの大きさ [km/h], [rpm]
+    cells = {}
+    n_all = 0
+    for f in files:
+        for r in csv.DictReader(open(f)):
+            try:
+                rpm = float(r['rpm']); spd = float(r['speed_obd'])
+            except (ValueError, KeyError, TypeError):
+                continue
+            g = gear_of(rpm, spd)
+            if not g: continue
+            v = (spd + 0.5) * GF
+            key = (int(v / DV), int(rpm / DR))
+            c = cells.setdefault(key, {})
+            c[g] = c.get(g, 0) + 1
+            n_all += 1
+
+    W, H = 760, 500
+    L, R_, T, B = 62, 116, 30, 74
+    x0, x1, y0, y1 = 0, 125, 2600, 10800
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R_)
+    fy = lambda r: H - B - (r - y0) / (y1 - y0) * (H - T - B)
+    s = [_hdr(W, H, '実走行の使用密度')]
+
+    for v in range(0, 126, 20):
+        s.append(f'<line x1="{fx(v):.1f}" y1="{T}" x2="{fx(v):.1f}" y2="{H-B}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.18"/>')
+        s.append(_txt(fx(v), H - B + 18, f'{v}', 11.5, anchor='middle'))
+    s.append(_txt((L + W - R_) / 2, H - B + 38, '実車速 [km/h]', 12.5, anchor='middle'))
+    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12.5" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 15 {(T+H-B)/2:.0f})">'
+             f'エンジン回転数 [rpm]</text>')
+    for r in range(3000, 10001, 1000):
+        s.append(f'<line x1="{L}" y1="{fy(r):.1f}" x2="{W-R_}" y2="{fy(r):.1f}" '
+                 f'stroke="{C_GR}" stroke-width="1" opacity="0.18"/>')
+        s.append(_txt(L - 8, fy(r) + 4, f'{r//1000},000', 11, anchor='end'))
+    for r, lab in ((LUG_RPM, '3,900　実用下限'), (8000, '8,000　最大トルク'),
+                   (9000, '9,000　最高出力')):
+        s.append(f'<line x1="{L}" y1="{fy(r):.1f}" x2="{W-R_}" y2="{fy(r):.1f}" '
+                 f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="4 3" opacity="0.65"/>')
+        s.append(_txt(W - R_ + 6, fy(r) + 4, lab, 10.5))
+
+    mx = max(sum(c.values()) for c in cells.values()) if cells else 1
+    for (iv, ir), c in sorted(cells.items(), key=lambda kv: sum(kv[1].values())):
+        g = max(c, key=c.get)
+        n = sum(c.values())
+        x, y = fx(iv * DV), fy((ir + 1) * DR)
+        w, h = fx(DV) - fx(0), fy(0) - fy(DR)
+        op = 0.18 + 0.72 * (n / mx) ** 0.4
+        s.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
+                 f'fill="{GC[g]}" opacity="{op:.2f}"/>')
+
+    # 理論線（15T）は密度の上に重ねる。実測がどの線に乗っているかの参照
+    for n in GEAR:
+        v2 = min(x1, v_at(9000, 15, n))
+        s.append(_path([(fx(v_at(LUG_RPM, 15, n)), fy(LUG_RPM)), (fx(v2), fy(rpm_at(v2, 15, n)))],
+                       '#ffffff', 2.2, op=0.5))
+        s.append(_path([(fx(v_at(LUG_RPM, 15, n)), fy(LUG_RPM)), (fx(v2), fy(rpm_at(v2, 15, n)))],
+                       GC[n], 1.0, op=0.9))
+
+    for i, n in enumerate(GEAR):
+        y = T + 12 + i * 17
+        s.append(f'<rect x="{L+14}" y="{y-9}" width="14" height="11" fill="{GC[n]}"/>')
+        s.append(_txt(L + 34, y, f'{n}速', 11.5, GC[n], weight='600'))
+    s.append(_txt(L + 76, T + 12, f'セル {DV:.1f}km/h × {DR}rpm、濃さ＝滞在時間', 11))
+    s.append(_txt(L + 76, T + 29, f'実走 3 本 {n_all:,} 点（ギヤ確定分のみ）', 11))
+    s.append(_txt(L + 76, T + 46, '細線＝15T の理論線', 11))
+    s.append('</svg>')
+    open(path, 'w', encoding='utf-8').write('\n'.join(s))
+    return True
+
+
 def make_figures(outdir='docs'):
     import os
     os.makedirs(outdir, exist_ok=True)
@@ -539,7 +634,8 @@ def make_figures(outdir='docs'):
     fig_window(f'{outdir}/fig2-window.svg')
     fig_ladder(f'{outdir}/fig3-ladder.svg')
     fig_ranges(f'{outdir}/fig4-ranges.svg')
-    for f in ('fig1-power', 'fig2-window', 'fig3-ladder', 'fig4-ranges'):
+    fig_usage(f'{outdir}/fig5-usage.svg')
+    for f in ('fig1-power', 'fig2-window', 'fig3-ladder', 'fig4-ranges', 'fig5-usage'):
         print(f'{outdir}/{f}.svg')
 
 
