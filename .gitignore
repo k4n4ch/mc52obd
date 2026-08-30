@@ -15,6 +15,9 @@ private/*
 # あるが、緯度経度はそのまま残るため公開はしない。公開するのはスクリーン
 # ショットだけにする（tools/cutlog.py と tools/shifttime.py で再生成できる）。
 samples/
+
+# 未公開の下書き（みんカラ投稿の文案など）
+drafts/
 *.gpx
 *.kml
 *.kmz
