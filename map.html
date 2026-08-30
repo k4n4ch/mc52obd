@@ -120,7 +120,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831c';
+const VERSION = 'v20260831d';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -562,6 +562,14 @@ async function routeBetween(a, b, brgA, brgB) {
   return {ok:true, pts, cum, length:cum[cum.length-1]};
 }
 
+/** 時刻 t に最も近い行。補完点の色と太さを実測から引くのに使う。 */
+function rowAtTime(t) {
+  if (!rows.length) return null;
+  let lo = 0, hi = rows.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (rows[m].t <= t) lo = m; else hi = m; }
+  return (Math.abs(rows[lo].t - t) <= Math.abs(rows[hi].t - t)) ? rows[lo] : rows[hi];
+}
+
 function alongRoute(rt, s) {
   const {pts, cum} = rt;
   if (s <= 0) return pts[0];
@@ -628,16 +636,19 @@ async function fillGaps() {
         notes.push(`経路長 ${(rt.length/1000).toFixed(2)}km と車速積分 ${(d.total/1000).toFixed(2)}km が ${errPct.toFixed(1)}% 乖離`);
         continue;
       }
-      // 累積距離を経路長へ正規化して並べる
+      /* 累積距離を経路長へ正規化して並べる。**時刻も持たせる。**
+       * トンネル内でも OBD は生きているのでギヤと車速は実測値があり、
+       * 推定なのは位置だけ。色と太さは実測と同じ意味で描ける。 */
       const k = rt.length / d.total, pts = [];
       let last = -1e9;
       for (const q of d.series) {
         const s = q.d * k;
         if (s - last < FILL_STEP_M) continue;
         const p = alongRoute(rt, s);
-        pts.push([p.lat, p.lon]); last = s;
+        pts.push({lat:p.lat, lon:p.lon, t:q.t}); last = s;
       }
-      pts.unshift([A.lat, A.lon]); pts.push([B.lat, B.lon]);
+      pts.unshift({lat:A.lat, lon:A.lon, t:A.t});
+      pts.push({lat:B.lat, lon:B.lon, t:B.t});
       fills.push({pts, km: rt.length/1000, errPct});
     } catch (e) { notes.push('経路探索に失敗: ' + e.message); }
     await new Promise(r => setTimeout(r, 300));   // 公開サーバなので間隔を空ける
@@ -713,14 +724,30 @@ function drawMap() {
       lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(layer);
   }
 
-  /* 測位を捨てた区間の補完。実測と同じ太さ・同じ線種にすると区別が付かないので、
-   * **長い破線**にして「推定である」ことを線種で示す。色はギヤ不明と同じ灰。 */
+  /* 測位を捨てた区間の補完。**色と太さは実測と同じ意味**で描く（トンネル内でも
+   * OBD は生きており、ギヤも車速も実測値がある。推定なのは位置だけ）。
+   * 区別は **破線＋ケーシング無し＋不透明度を落とす** の 3 点で付ける。
+   * ケーシングを敷かないことが、実測との差が一番はっきり出る手掛かりになる。 */
   for (const f of fills) {
     if (f.pts.length < 2) continue;
-    L.polyline(f.pts, {color:casing, weight:5, opacity:.8, dashArray:'9,7',
-      lineCap:'butt', lineJoin:'round', interactive:false}).addTo(layer);
-    L.polyline(f.pts, {color:css('--gx'), weight:2.5, opacity:.95, dashArray:'9,7',
-      lineCap:'butt', lineJoin:'round', interactive:false}).addTo(layer);
+    let c2 = null; const fr = [];
+    for (const p of f.pts) {
+      const r = rowAtTime(p.t);
+      const g = r ? r.gear : null, sc = spdClass(r ? r.spdTrue : null);
+      const key = (g ?? 'x') + ':' + sc;
+      if (!c2 || c2.key !== key) {
+        if (c2) c2.pts.push([p.lat, p.lon]);          // 境界点を共有
+        c2 = {key, gear:g, w:SPD_W[sc], pts:[[p.lat, p.lon]]};
+        fr.push(c2);
+      } else c2.pts.push([p.lat, p.lon]);
+    }
+    for (const r of fr) {
+      if (r.pts.length < 2) continue;
+      const dim = isolate !== null && r.gear !== isolate;
+      L.polyline(r.pts, {color: r.gear ? css(GCOL[r.gear]) : css('--gx'),
+        weight: r.gear ? r.w : Math.max(1.5, r.w * 0.5), opacity: dim ? .12 : .72,
+        dashArray:'5,4', lineCap:'butt', lineJoin:'round', interactive:false}).addTo(layer);
+    }
   }
   marker.addTo(layer);
   // 抜き出しの切り替えで視点が戻らないよう、最初の描画時だけ範囲を合わせる
@@ -749,7 +776,7 @@ function addLegend() {
       <div class="row" style="margin-top:.25rem">
       <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="3,4"/></svg><span>半クラ・シフト</span>
       <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="1,4"/></svg><span>低速</span></div>
-      <div class="row"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="9,7"/></svg><span>測位途絶の補完（推定）</span></div>
+      <div class="row"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--g3')}" stroke-width="2.5" stroke-dasharray="5,4" opacity=".72"/></svg><span>位置は推定（縁なし・破線）</span></div>
       <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
     L.DomEvent.disableClickPropagation(d);
     d.querySelectorAll('.gsel').forEach(el => {
