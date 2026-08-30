@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830a';
+const VERSION = 'v20260830b';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -358,6 +358,7 @@ async function connect() {
     log('接続: ' + (bleDevice.name || '?') + ' [' + bleDevice.id.slice(0, 8) + ']', 'ok');
     checkKnownDevice();
     const init = await initElm();
+    sessionProto = ((init.dp || '') + ' (' + (init.dpn || '') + ')').replace(/,/g, ' ');
     if (!verifyProtocol(init)) { userDisc = true; disconnect(); return; }
     startPolling();
     syncWakeLock();
@@ -398,6 +399,7 @@ async function autoReconnect() {
       setChip('cBle', true); setBtn('bConn', true, '切断');
       log('再接続 成功', 'ok');
       const init = await initElm();
+      sessionProto = ((init.dp || '') + ' (' + (init.dpn || '') + ')').replace(/,/g, ' ');
       if (!verifyProtocol(init)) { userDisc = true; disconnect(); reconnecting = false; return; }
       startPolling();
       reconnecting = false;
@@ -470,8 +472,9 @@ async function initElm() {
   await cmd('ATAT0');
   await cmd('ATST14');       // 0x14 = 20 → 80ms
   await cmd('ATSP5');        // ISO 14230-4 KWP FAST（実測で確定済み）
-  // AUTO のまま走ると欠測が桁で増える（2026-08-30 実測: AUTO は全域 14〜25%、
-  // ATSP5 を明示すると最良 2.0%）。安易に落とさず、まず張り直しを 2 回試す。
+  // AUTO のまま走ると欠測が増える傾向がある（2026-08-30 停車実測: AUTO 平均 16.4%、
+  // ATSP5 明示 平均 9.9%）。ただし同一設定の再現ばらつきが最大 21.5pt あり、この差は
+  // まだ確定的でない。明示のコストはゼロなので、落とす前に張り直しを 2 回試す。
   let r = await cmd('0100', 15000);
   for (let i = 1; i <= 2 && /UNABLE|ERROR|NO DATA/i.test(r); i++) {
     log('ATSP5 で確立できず、張り直す (' + i + '/2)', 'w');
@@ -639,6 +642,11 @@ if (!isFinite(p3Delay) || p3Delay < 0 || p3Delay > 500) p3Delay = 0;
 
 let polling = false, cycle = 0, fastIdx = 0;
 let hits = 0, misses = 0, rateT0 = 0, rateN = 0;
+// 走行ログから条件を後追いできるよう、セッションの設定を保持して CSV に落とす。
+// 実走の脱落 43% が停車（約 10%）で再現しないため、プロトコルが AUTO へ落ちて
+// いたのかを**ログ自体から**判定できるようにする。
+let sessionProto = '';
+let missAtLastRow = 0;
 let watchdog = null;
 
 function startPolling() {
@@ -813,13 +821,16 @@ function pushRow() {
     rpm: V.rpm, spd: V.spd, thr: V.thr,
     load: V.load, ect: V.ect, volt: V.volt, fuelsys: V.fuelsys,
     skew: VT.spd - VT.rpm,       // 車速と回転数の取得時刻差 [ms]
+    miss: misses - missAtLastRow,  // 前の行からこの行までに落ちた要求数
   });
+  missAtLastRow = misses;
 }
 
 function toggleRec() {
   recording = !recording;
   if (recording) {
     obdRows = []; gpsBuf = []; recT0 = Date.now();
+    missAtLastRow = misses;
     if (gpsEnabled) startGps();
     log('記録開始', 'ok');
   } else {
@@ -850,10 +861,13 @@ function dl(text, mime, ext) {
 
 // OBD と GPS を時刻で結合した解析用 CSV。ギヤ判定の較正はこれを使う。
 function exportCsv() {
+  // 末尾 5 列はビュワーが参照しない（列名で引く実装のため無視される）。
+  // app/proto/p3/sprocket_f は先頭行だけ埋める。セッション定数なので全行に
+  // 複製する意味が無く、後処理は 1 行目を読めばよい。
   const head = 't_sec,iso_time,rpm,speed_obd,throttle,load,ect,volt,fuelsys,skew_ms,' +
-               'lat,lon,speed_gps,alt,gps_acc\n';
+               'lat,lon,speed_gps,alt,gps_acc,miss,app,proto,p3,sprocket_f\n';
   let gi = 0;
-  const body = obdRows.map(r => {
+  const body = obdRows.map((r, ri) => {
     // 直近の GPS fix を 2 秒以内に限って結合する
     while (gi + 1 < gpsBuf.length && Math.abs(gpsBuf[gi + 1].t - r.t) <= Math.abs(gpsBuf[gi].t - r.t)) gi++;
     const g = (gpsBuf.length && Math.abs(gpsBuf[gi].t - r.t) <= 2000) ? gpsBuf[gi] : null;
@@ -866,6 +880,9 @@ function exportCsv() {
       g ? g.lat.toFixed(7) : '', g ? g.lon.toFixed(7) : '',
       g && g.spd != null ? g.spd.toFixed(2) : '',
       g && g.alt != null ? g.alt.toFixed(1) : '', g ? g.acc.toFixed(1) : '',
+      r.miss == null ? '' : r.miss,
+      ri ? '' : VERSION, ri ? '' : sessionProto,
+      ri ? '' : p3Delay, ri ? '' : sprkFront,
     ].join(',');
   }).join('\n');
   dl(head + body + '\n', 'text/csv', '.csv');
