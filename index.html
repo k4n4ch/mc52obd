@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830f';
+const VERSION = 'v20260830g';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -233,15 +233,15 @@ for (const n in GEAR_RATIO) R[n] = PRIMARY * GEAR_RATIO[n] * SECONDARY / (TIRE_C
  * 段ごとに k を独立に当てると生値では 2速1.0213〜6速1.0129 と単調にずれ、
  * 車速へ +0.5 を戻すとばらつきが 0.83% → 0.13% に潰れる。これは低速ほど
  * 比が高く出る切り捨ての症状そのもの。以後は真値を `0D + 0.5` として扱う。
- * 旧 k=1.013 系はこの偏りを吸収した値なので、保存値ごと入れ替える。 */
+ * 旧 k=1.013 系はこの偏りを吸収した値なので捨てる。
+ *
+ * **k は閉じた定数で、車両ごとの較正を要しない。** k を構成するのは
+ * 一次減速比・変速比（諸元）と ECU の固定係数（ファーム定数）だけで、
+ * 車速センサはファイナルより上流にあるため前後スプロケも実タイヤも
+ * 空気圧も摩耗も効かない。較正すべき自由度が存在しないので定数にする。
+ * 実測 5 走行 n=1554 で、新 3 本は 1.0055/1.0057/1.0064（幅 0.09%）。 */
 const SPD_HALF = 0.5;
-let gearK = parseFloat(localStorage.getItem('mc52_k'));
-if (localStorage.getItem('mc52_k_v') !== '2') {
-  gearK = 1.0057;
-  localStorage.setItem('mc52_k', '1.0057');
-  localStorage.setItem('mc52_k_v', '2');
-}
-if (!(gearK > 0.9 && gearK < 1.1)) gearK = 1.0057;
+const gearK = 1.0057;
 
 /* ── 表示車速の補正 ────────────────────────────────────────
  * `0D` は ECU が**純正のスプロケット丁数を固定前提**にして換算した値なので、
@@ -776,7 +776,7 @@ function render() {
   // 判定の妥当性を走りながら見るため、比と使用中の k を併記する
   $('ratio').textContent = canRatio
     ? '比 ' + (V.rpm / (V.spd + SPD_HALF)).toFixed(1) + ' / k ' + gearK.toFixed(4)
-    : 'k ' + gearK.toFixed(4);
+    : 'k ' + gearK.toFixed(4);   // k は定数（較正不要）
 }
 
 function cls(id, c) {
