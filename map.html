@@ -118,7 +118,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831a';
+const VERSION = 'v20260831b';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -303,18 +303,54 @@ function parseCsv(text) {
  * Σ(GPS)/Σ(0D) を使っており、汚れた値が混ざると推定がずれる。 */
 const GPS_ACC_MAX = 50;    // [m] これを超える測位は使わない
 const GPS_BREAK_S = 5;     // [s] 測位がこれ以上空いたら線を切る
+const GPS_DEV_KMH = 25;    // [km/h] OBD 車速との乖離がこれを超える測位も捨てる
+const GPS_DEV_WIN = 5;     // [s] その判定に使う微分窓
 
+const havM = (la1, lo1, la2, lo2) => {
+  const R = 6371000, rad = Math.PI / 180;
+  const s1 = Math.sin((la2 - la1) * rad / 2), s2 = Math.sin((lo2 - lo1) * rad / 2);
+  return 2 * R * Math.asin(Math.sqrt(
+    s1 * s1 + Math.cos(la1 * rad) * Math.cos(la2 * rad) * s2 * s2));
+};
+
+/* 精度が良いと申告しながら座標が凍る／ずれる測位を、OBD 車速との乖離で捨てる。
+ * FL4 側も同じ判定を持つ（Pixel で「5 分半にわたり座標が完全に同一のまま点が
+ * 出続けた」実測がある）。精度は測位の自己申告なので、これだけでは坑口の
+ * 未収束を取りこぼす。
+ *
+ * **微分窓の選び方が要点。** 行間隔が 0.73 秒しかないため、精度 4m の位置差から
+ * 速度を出すと 4m/0.73s ≒ 20km/h の雑音が乗る。FL4 の閾値 25km/h をそのまま
+ * 1 行差分に当てると、トンネルの無い走行で 1,738 点が誤検出された。
+ * 窓を広げると雑音は減るが、カーブで直線距離が実経路より短くなる誤差が増える。
+ * 実測（3 走行 13,153 行）で 2s→誤検出 528 点、5s→0 点、10s→18 点。5 秒を採る。 */
 function dropBadFixes(rows) {
-  let n = 0;
-  for (const r of rows) {
-    if (r.acc != null && r.acc > GPS_ACC_MAX) {
-      r.lat = r.lon = r.gspd = null;
-      r.badFix = true;
-      n++;
-    }
+  /* 2 つの判定は**どちらも元データ上で先に計算する**。精度基準で先に間引くと、
+   * 消えた点の隣が窓を作れず（次の生存点まで時間が飛ぶ）評価されないまま残る。
+   * 実測でその形にすると、拾えるはずの 42 点のうち 16 点しか捕まらなかった。 */
+  const fix = [];
+  for (let i = 0; i < rows.length; i++) if (rows[i].lat != null) fix.push(i);
+  const bad = new Set();
+
+  for (const i of fix) if (rows[i].acc != null && rows[i].acc > GPS_ACC_MAX) bad.add(i);
+
+  // GPS の移動量が OBD 車速と釣り合わない測位。実測では該当点が 100%、
+  // 精度不良の区間の前後 15 秒以内に出た＝坑口の縁（FL4 の trimAnchor 相当）。
+  for (let a = 0; a < fix.length; a++) {
+    let b = a;
+    while (b + 1 < fix.length && rows[fix[b + 1]].t - rows[fix[a]].t < GPS_DEV_WIN) b++;
+    const A = rows[fix[a]], B = rows[fix[b]], dt = B.t - A.t;
+    if (dt < GPS_DEV_WIN * 0.6 || A.spd == null || B.spd == null) continue;
+    const ref = (A.spd + B.spd) / 2 * speedCorr();
+    const v = havM(A.lat, A.lon, B.lat, B.lon) / dt * 3.6;
+    if (Math.abs(v - ref) > GPS_DEV_KMH) bad.add(fix[a]);
   }
-  rows.badFixes = n;
-  return n;
+
+  for (const i of bad) {
+    rows[i].lat = rows[i].lon = rows[i].gspd = null;
+    rows[i].badFix = true;
+  }
+  rows.badFixes = bad.size;
+  return bad.size;
 }
 
 /* ── 回転数を車速の取得時刻へ合わせる ──────────────────────
