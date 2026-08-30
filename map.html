@@ -137,7 +137,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831l';
+const VERSION = 'v20260831m';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1012,12 +1012,16 @@ function drawChart(s) {
 // ── 連動カーソル ─────────────────────────────────────────
 // チャートをなぞると、その時刻の値が見出しに出て地図上の位置も動く。
 function bindCursor(cv) {
-  // タッチでは「横に動かす意図」が確認できるまでスクラブを始めない。
-  // 縦に動かしているならブラウザにスクロールさせる（touch-action:pan-y）。
-  let start = null, locked = false;
+  /* タッチでは「横に動かす意図」が確認できるまでスクラブを始めない。
+   * 縦に動かしているならブラウザにスクロールさせる（touch-action:pan-y）。
+   *
+   * **押したときだけ位置を確定する。** マウスのホバーは下見に留め、離れたら
+   * 確定位置へ戻す。再生が付いたことでカーソルは「再生位置」の意味を持ったので、
+   * 再生ボタンへマウスを動かす途中で位置が引きずられると選び直せない。 */
+  let start = null, locked = false, down = false;
   const LOCK_PX = 8;
 
-  const scrub = e => {
+  const scrub = (e, commit) => {
     if (!rows.length) return;
     const rect = cv.getBoundingClientRect();
     const cx = e.clientX - rect.left;
@@ -1029,20 +1033,26 @@ function bindCursor(cv) {
       if (d < bd) { bd = d; bi = i; }
     }
     setCursor(bi);
-    /* **再生位置は「手でなぞったとき」だけ更新する。** setCursor の中で更新すると、
+    /* **再生位置は確定操作のときだけ更新する。** setCursor の中で更新すると、
      * 再生ループが進めた playT を行の時刻へスナップして戻してしまう。行間隔が
      * 0.73 秒あるので、1 倍速では 1 フレーム 0.017 秒しか進まず必ず同じ行に戻り、
      * **再生が止まったまま**になる（v20260831i の不具合）。 */
-    playT = rows[bi].t;
+    if (commit) playT = rows[bi].t;
+  };
+
+  // ホバーの下見から確定位置へ戻す
+  const restore = () => {
+    if (!rows.length) { setCursor(-1); return; }
+    setCursor(idxAtT(playT));
   };
 
   cv.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') { start = {x: e.clientX, y: e.clientY}; locked = false; }
-    else { locked = true; scrub(e); }
+    else { locked = true; down = true; scrub(e, true); }   // クリックで確定
   });
 
   cv.addEventListener('pointermove', e => {
-    if (e.pointerType !== 'touch') { scrub(e); return; }
+    if (e.pointerType !== 'touch') { scrub(e, down); return; }   // 押していなければ下見
     if (!start) return;
     if (!locked) {
       const dx = Math.abs(e.clientX - start.x), dy = Math.abs(e.clientY - start.y);
@@ -1050,16 +1060,17 @@ function bindCursor(cv) {
       if (dx < LOCK_PX) return;                                 // まだ判断できない
       locked = true;
     }
-    scrub(e);
+    scrub(e, true);       // タッチで横へ動かすのは意図的な操作なので確定
     e.preventDefault();   // 横と確定した後だけ抑止する
   });
 
-  const end = () => { start = null; locked = false; };
+  const end = () => { start = null; locked = false; down = false; };
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);          // ブラウザがスクロールを引き取った
   cv.addEventListener('pointerleave', e => {
     end();
-    if (e.pointerType !== 'touch') setCursor(-1);     // タッチでは値を残す
+    // マウスは離れたら確定位置へ戻す。タッチは指を離した位置がそのまま確定
+    if (e.pointerType !== 'touch') restore();
   });
 }
 
