@@ -56,7 +56,7 @@ async def run(args):
     addr = await elm.connect()
     print(f"[+] 接続: {addr}")
     try:
-        init = await elm.init(headers=True)
+        init = await elm.init(headers=True, protocol="5")
         print(f"[+] プロトコル: {init['protocol']}\n")
 
         delays = [int(x) for x in args.delays.split(",")]

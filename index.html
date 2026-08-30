@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260829d';
+const VERSION = 'v20260830a';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -470,9 +470,20 @@ async function initElm() {
   await cmd('ATAT0');
   await cmd('ATST14');       // 0x14 = 20 → 80ms
   await cmd('ATSP5');        // ISO 14230-4 KWP FAST（実測で確定済み）
-  const r = await cmd('0100', 15000);
+  // AUTO のまま走ると欠測が桁で増える（2026-08-30 実測: AUTO は全域 14〜25%、
+  // ATSP5 を明示すると最良 2.0%）。安易に落とさず、まず張り直しを 2 回試す。
+  let r = await cmd('0100', 15000);
+  for (let i = 1; i <= 2 && /UNABLE|ERROR|NO DATA/i.test(r); i++) {
+    log('ATSP5 で確立できず、張り直す (' + i + '/2)', 'w');
+    await cmd('ATZ', 8000);
+    for (const c of ['ATE0', 'ATL0', 'ATS0', 'ATH1']) await cmd(c);
+    await cmd('ATAT0');
+    await cmd('ATST14');
+    await cmd('ATSP5');
+    r = await cmd('0100', 15000);
+  }
   if (/UNABLE|ERROR|NO DATA/i.test(r)) {
-    log('ATSP5 で確立できず、自動探索へ', 'w');
+    log('ATSP5 が通らない。自動探索へ落とす（欠測が増える）', 'e');
     await cmd('ATSP0');
     await cmd('0100', 20000);
   }
@@ -614,11 +625,17 @@ function handlePid(pid, block) {
 //   ・0x0C の脱落率 36〜38%。回転数帯・車速帯を問わず平坦（停車中も 38%）で、
 //     バースト性も無い（451 連中 435 が 1 回のみ）→ 無線でも運転状態でもない
 //   ・脱落サイクルの超過時間 +170ms が ATST(80ms)＋BLE 往復と一致
-// つまり ECU が要求を無視している形。待ちを入れて検証する。
-//
-// 最適値はログから詰めるため localStorage で調整可能にしてある。
+// つまり ECU が要求を無視している形に見えた。→ 2026-08-30 の停車実測で**棄却**。
+// 同じ待ち 80ms が 0.0% と 21.5% を行き来し、待ち時間と欠測率に安定した関係が無い。
+// 記録レートで見ると待ち 0ms が 2 回とも最良（1.28 / 1.21 Hz、55ms は 0.97 Hz）
+// だったので既定を 0 にする。旧既定 55ms が保存されている端末は一度だけ捨てる。
 let p3Delay = parseInt(localStorage.getItem('mc52_p3'), 10);
-if (!isFinite(p3Delay) || p3Delay < 0 || p3Delay > 500) p3Delay = 55;
+if (localStorage.getItem('mc52_p3_v') !== '2') {
+  p3Delay = 0;
+  localStorage.setItem('mc52_p3', '0');
+  localStorage.setItem('mc52_p3_v', '2');
+}
+if (!isFinite(p3Delay) || p3Delay < 0 || p3Delay > 500) p3Delay = 0;
 
 let polling = false, cycle = 0, fastIdx = 0;
 let hits = 0, misses = 0, rateT0 = 0, rateN = 0;
@@ -917,8 +934,8 @@ $('bGps').onclick = () => {
 };
 $('alert').onclick = clearAlert;   // タップで消す
 
-// 要求前の待ち時間をその場で振れるようにする。1 回の走行で複数の値を試して
-// 欠測率の変化を見るため。P3min 説の検証が目的なので 55ms を挟んである。
+// 要求前の待ち時間をその場で振れるようにする。P3min 説は棄却済みで既定は 0ms。
+// 走行中に欠測が多いと感じたときの逃げ道として残してある。
 const P3_STEPS = [0, 30, 55, 80, 110];
 $('hz').onclick = () => {
   p3Delay = P3_STEPS[(P3_STEPS.indexOf(p3Delay) + 1) % P3_STEPS.length];
