@@ -53,6 +53,7 @@ button:disabled{opacity:.35}
 #tolMax{color:var(--mute)}
 #stat{margin-left:auto; color:var(--dim); font-size:.72rem; white-space:nowrap}
 #ver{color:var(--dim); font-size:.68rem; opacity:.65; white-space:nowrap}
+#cur{color:var(--warn); font-size:.72rem; white-space:nowrap; font-variant-numeric:tabular-nums}
 
 /* ── 本体 ── */
 #wrap{flex:1 1 auto; display:flex; min-height:0}
@@ -109,6 +110,7 @@ button:disabled{opacity:.35}
   <button id="estsp" disabled title="GPS 速度との一致から前後の丁数を推定する。速度比だけでは一意に決まらないため候補も出す">丁数推定</button>
   <button id="tbl" disabled>表</button>
   <span id="stat">CSV を読み込む</span>
+  <span id="cur"></span>
   <span id="ver"></span>
 </div>
 
@@ -120,7 +122,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831e';
+const VERSION = 'v20260831g';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -850,6 +852,10 @@ function drawCharts() {
 }
 
 function drawChart(s) {
+  // キャンバスが未生成のうちに refresh() が走ることがある（丁数の自動推定が
+  // buildCharts より前に refresh を呼ぶ経路があった）。例外にすると読み込み
+  // 処理ごと中断してチャートが 1 枚も出なくなるので、ここで黙って戻る
+  if (!s.canvas) return;
   const cv = s.canvas, dpr = devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;
   if (!w || !h) return;
@@ -879,6 +885,27 @@ function drawChart(s) {
   for (const [a, b] of stopSpans(3)) {
     const x0 = X(a), x1 = X(b);
     if (x1 > x0) g.fillRect(x0, 2, Math.max(1.5, x1 - x0), h - 8);
+  }
+
+  /* 時間軸の目盛り。**6 枚が X 軸を共有しているので全チャートに引く。**
+   * 下端の 1 枚だけに置くとスクロールで見えなくなり、区間を時刻で指す用が
+   * 足せない（ログの何分何秒を見ているかが分からない）。 */
+  {
+    const span = t1 - t0;
+    const STEPS = [10, 30, 60, 120, 300, 600, 900, 1800];
+    const step = STEPS.find(v => span / v <= 9) || 3600;
+    g.strokeStyle = css('--line'); g.lineWidth = 1;
+    g.fillStyle = css('--mute'); g.font = '9px -apple-system,sans-serif';
+    g.textAlign = 'center';
+    // 刻みは**経過時間**で置く。絶対時刻で刻むと開始が端数のぶんずれて
+    // 「9:59」のような目盛りになり、区間を時刻で指すときに読みにくい
+    for (let e = step; e <= span; e += step) {
+      const x = X(t0 + e);
+      g.globalAlpha = .5;
+      g.beginPath(); g.moveTo(x, 2); g.lineTo(x, h - 11); g.stroke();
+      g.globalAlpha = 1;
+      g.fillText(mmss(e), x, h - 2);
+    }
   }
 
   // 目盛りは控えめに。上下の 2 本だけ
@@ -983,9 +1010,16 @@ function bindCursor(cv) {
   });
 }
 
+/** 経過秒を m:ss にする。区間を探すときに秒で言えないと照合できない。 */
+function mmss(sec) {
+  const s = Math.max(0, Math.round(sec));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
 function setCursor(i) {
   cursor = i;
   const r = i >= 0 ? rows[i] : null;
+  $('cur').textContent = r ? `t = ${mmss(r.t - rows[0].t)}（${r.t.toFixed(0)}s）` : '';
   for (const s of SERIES) {
     const el = $('v_' + s.key);
     const v = r ? r[s.key] : null;
@@ -1060,11 +1094,13 @@ $('file').onchange = e => {
       drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
       computeRatios();           // fitK は比を見るので先に用意する
       $('estsp').disabled = false;
-      // 一度も設定していなければ自動で入れる。設定済みなら勝手に上書きしない
-      if (localStorage.getItem('mc52_sf') == null) applyEstimate(true);
       $('tbl').disabled = false;
       showKDiag();
+      // **丁数の自動推定より先にキャンバスを作る。** 推定は onSprk 経由で
+      // refresh を呼ぶので、後に置くと描画対象が無いまま走る
       buildCharts();
+      // 一度も設定していなければ自動で入れる。設定済みなら勝手に上書きしない
+      if (localStorage.getItem('mc52_sf') == null) applyEstimate(true);
       refresh();
       // 経路探索は外部サービスなので、地図を出してから非同期で足す。
       // 失敗しても既に描いたものは残る
