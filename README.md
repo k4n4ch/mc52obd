@@ -2,6 +2,14 @@
 
 Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるかを探索する。
 
+| | |
+|---|---|
+| **走行中のモニタ** | <https://k4n4ch.github.io/mc52obd/> |
+| **ログビュワー** | <https://k4n4ch.github.io/mc52obd/map.html> |
+
+モニタは **Android Chrome + HTTPS** が要る（Web Bluetooth が iOS Safari 非対応のため）。
+ビュワーは PC ブラウザでも動く。
+
 リポジトリ名は車名ではなく型式に合わせている（`fl4obd` / `thsobd` と同じ）。
 
 停車状態での対応 PID 全数探索から始め、走行中に扱う段はスマートフォン側に載せる。
