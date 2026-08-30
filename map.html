@@ -137,7 +137,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831k';
+const VERSION = 'v20260831l';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1148,11 +1148,11 @@ function setCursor(i) {
     el.textContent = v == null ? '--' : (+v).toFixed(s.fix) + (s.unit ? ' ' + s.unit : '');
   }
   const mp = r ? markerPos(r) : null;
-  if (marker && mp) {
-    marker.setLatLng(mp.ll);
-    // 補完区間では中を抜いて「位置は推定」を示す。地図の線と同じ約束
-    marker.setStyle({opacity:1, fillOpacity: mp.est ? 0.25 : 1});
-  } else if (marker) marker.setStyle({opacity:0, fillOpacity:0});
+  /* 補完区間でも見た目は変えない。**マーカーの仕事は「いまどこか」を示すこと**で、
+   * 視認性を落とすのは役割と衝突する。位置が推定であることは、その場所に引かれた
+   * 破線が既に示している（一度 fillOpacity を落としたが、追いかけにくくなった）。 */
+  if (marker && mp) marker.setLatLng(mp.ll), marker.setStyle({opacity:1, fillOpacity:1});
+  else if (marker) marker.setStyle({opacity:0, fillOpacity:0});
   drawCharts();
 }
 
