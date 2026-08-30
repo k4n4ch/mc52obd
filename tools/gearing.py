@@ -533,9 +533,14 @@ def fig_ranges(path):
 
 
 def fig_usage(path, logdir='private'):
-    """実走行の使用密度を 車速×回転数 の平面に重ねる。
+    """実走行の使用点を 車速×回転数 の平面に散布する。
 
     理論のギア線図（fig4）と同じ平面に、実測がどこに落ちているかを描く。
+    当初はセルに区切った密度図にしたが、軸に平行な粗いセルで斜めの帯を表すため
+    階段状になり、隣接する段のセルが不透明度違いで並んで境界が濁った。
+    暗い背景では特に「潰れた画像」のように見える。点をそのまま打つ方が、
+    密度は自然な濃淡になり、斜めの帯は斜めに見える。
+
     ログは個人の移動履歴なのでリポジトリに含めない。無ければ図も作らない。
     """
     import csv, glob, os
@@ -544,7 +549,7 @@ def fig_usage(path, logdir='private'):
         print(f'  （{logdir}/mc52_*.csv が無いので使用密度図は作らない）')
         return False
 
-    K, GF = 1.0057, 15 / 14        # ECU 生値→真値の補正と丁数補正
+    K, GF = 1.0057, 15 / 14
     Rk = {n: PRIMARY * GEAR[n] * REAR / 14 / (CIRC * 60 / 1000) for n in GEAR}
     def gear_of(rpm, spd):
         if spd is None or rpm is None or spd < 8 or rpm < 500: return None
@@ -555,9 +560,7 @@ def fig_usage(path, logdir='private'):
             if d < bd: bd, best = d, n
         return best if bd <= 0.04 + 0.5 / s else None
 
-    DV, DR = 2.5, 200              # セルの大きさ [km/h], [rpm]
-    cells = {}
-    n_all = 0
+    pts = {n: [] for n in GEAR}
     for f in files:
         for r in csv.DictReader(open(f)):
             try:
@@ -565,19 +568,15 @@ def fig_usage(path, logdir='private'):
             except (ValueError, KeyError, TypeError):
                 continue
             g = gear_of(rpm, spd)
-            if not g: continue
-            v = (spd + 0.5) * GF
-            key = (int(v / DV), int(rpm / DR))
-            c = cells.setdefault(key, {})
-            c[g] = c.get(g, 0) + 1
-            n_all += 1
+            if g: pts[g].append(((spd + 0.5) * GF, rpm))
+    n_all = sum(len(v) for v in pts.values())
 
     W, H = 760, 500
     L, R_, T, B = 62, 116, 30, 74
     x0, x1, y0, y1 = 0, 125, 2600, 10800
     fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R_)
     fy = lambda r: H - B - (r - y0) / (y1 - y0) * (H - T - B)
-    s = [_hdr(W, H, '実走行の使用密度')]
+    s = [_hdr(W, H, '実走行の使用点')]
 
     for v in range(0, 126, 20):
         s.append(f'<line x1="{fx(v):.1f}" y1="{T}" x2="{fx(v):.1f}" y2="{H-B}" '
@@ -594,33 +593,30 @@ def fig_usage(path, logdir='private'):
     for r, lab in ((LUG_RPM, '3,900　実用下限'), (8000, '8,000　最大トルク'),
                    (9000, '9,000　最高出力')):
         s.append(f'<line x1="{L}" y1="{fy(r):.1f}" x2="{W-R_}" y2="{fy(r):.1f}" '
-                 f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="4 3" opacity="0.65"/>')
+                 f'stroke="{C_TX}" stroke-width="1" stroke-dasharray="4 3" opacity="0.6"/>')
         s.append(_txt(W - R_ + 6, fy(r) + 4, lab, 10.5))
 
-    mx = max(sum(c.values()) for c in cells.values()) if cells else 1
-    for (iv, ir), c in sorted(cells.items(), key=lambda kv: sum(kv[1].values())):
-        g = max(c, key=c.get)
-        n = sum(c.values())
-        x, y = fx(iv * DV), fy((ir + 1) * DR)
-        w, h = fx(DV) - fx(0), fy(0) - fy(DR)
-        op = 0.18 + 0.72 * (n / mx) ** 0.4
-        s.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
-                 f'fill="{GC[g]}" opacity="{op:.2f}"/>')
+    # 点は段ごとに 1 本の path へまとめる。長さ 0 の線分＋丸キャップで点になり、
+    # <circle> を1万個並べるより桁で小さい
+    for n in GEAR:
+        if not pts[n]: continue
+        d = ''.join(f'M{fx(v):.1f},{fy(r):.1f}h0' for v, r in pts[n]
+                    if x0 <= v <= x1 and y0 <= r <= y1)
+        s.append(f'<path d="{d}" stroke="{GC[n]}" stroke-width="3.6" stroke-opacity="0.30" '
+                 f'stroke-linecap="round" fill="none"/>')
 
-    # 理論線（15T）は密度の上に重ねる。実測がどの線に乗っているかの参照
+    # 理論線は点の上に細く重ねる。主役は点なので線は控えめにする
     for n in GEAR:
         v2 = min(x1, v_at(9000, 15, n))
-        s.append(_path([(fx(v_at(LUG_RPM, 15, n)), fy(LUG_RPM)), (fx(v2), fy(rpm_at(v2, 15, n)))],
-                       '#ffffff', 2.2, op=0.5))
-        s.append(_path([(fx(v_at(LUG_RPM, 15, n)), fy(LUG_RPM)), (fx(v2), fy(rpm_at(v2, 15, n)))],
-                       GC[n], 1.0, op=0.9))
+        seg = [(fx(v_at(LUG_RPM, 15, n)), fy(LUG_RPM)), (fx(v2), fy(rpm_at(v2, 15, n)))]
+        s.append(_path(seg, GC[n], 1.0, dash='6 4', op=0.75))
 
     for i, n in enumerate(GEAR):
         y = T + 12 + i * 17
         s.append(f'<rect x="{L+14}" y="{y-9}" width="14" height="11" fill="{GC[n]}"/>')
         s.append(_txt(L + 34, y, f'{n}速', 11.5, GC[n], weight='600'))
-    s.append(_txt(L + 76, T + 12, f'セル {DV:.1f}km/h × {DR}rpm、濃さ＝滞在時間', 11))
-    s.append(_txt(L + 76, T + 29, f'実走 3 本 {n_all:,} 点（ギヤ確定分のみ）', 11))
+    s.append(_txt(L + 76, T + 12, f'実走 3 本 {n_all:,} 点（ギヤ確定分のみ）', 11))
+    s.append(_txt(L + 76, T + 29, '1 点 = 1 サンプル。濃い所ほど滞在時間が長い', 11))
     s.append(_txt(L + 76, T + 46, '細線＝15T の理論線', 11))
     s.append('</svg>')
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
