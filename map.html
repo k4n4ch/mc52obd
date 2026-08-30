@@ -122,7 +122,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831g';
+const VERSION = 'v20260831h';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -160,6 +160,7 @@ const GEARS = [1,2,3,4,5,6];
  * 実測（5 走行 n=1554）: 新 3 本 1.0055/1.0057/1.0064（幅 0.09%）、
  * 旧 2 本は時刻ズレ未修正で 1.0036/1.0084。判定窓 4% に対し桁違いに小さい。 */
 const GEAR_K = 1.0057;
+const GEAR_RPM_MIN = 1700;   // アイドル(約1500)と1速の下限(1828)の間
 
 /* 判定窓の上限は諸元から決まる。窓を |比/予測 - 1| ≤ t と定義しているので、
  * 隣接する 2 段の窓が重ならない条件は
@@ -438,6 +439,15 @@ function assignGears(k, tolPct) {
              : r.spd <= STOP_KMH ? 'stop'
              : r.ratio == null ? 'slow' : 'unk';
     if (r.ratio == null) continue;
+    /* **アイドル回転では、嵌合している段は存在しない。**
+     * クラッチを切って惰性で減速すると回転数がアイドル（約1,400）に張り付き、
+     * 車速との比が偶然どれかの段と一致してしまう。実測では 6速 22km/h が
+     * 理論 1,470rpm なので比としては正しく合ってしまい、残差では弾けない。
+     * 車速下限 8km/h を課しているので**本物の 1速でも最低 1,828rpm**になる。
+     * アイドル上限（実測 約1,500）と 1速の下限の間に閾値を置けば、正当な
+     * 判定を 1 つも失わずに切り離せる。実測 13,153 行で落ちるのは 72 点、
+     * その **100% がスロットル全閉**（＝クラッチを切って惰性走行）だった。 */
+    if (r.rpm < GEAR_RPM_MIN) continue;
     let best = null, bd = Infinity;
     for (const n of GEARS) {
       const d = Math.abs(r.ratio / (k * R[n]) - 1);

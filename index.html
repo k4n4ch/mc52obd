@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830h';
+const VERSION = 'v20260831a';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -281,10 +281,16 @@ let gearTol = parseFloat(localStorage.getItem('mc52_tol')) || 4.0;
 if (!(gearTol > 0) || gearTol > TOL_MAX) gearTol = Math.min(4.0, TOL_MAX);
 
 const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴れる
+/* **アイドル回転では、嵌合している段は存在しない。** クラッチを切って惰性で
+ * 減速すると回転数がアイドル（約1,400）に張り付き、車速との比が偶然どれかの
+ * 段と一致する（6速 22km/h の理論値が 1,470rpm なので比としては合う）。
+ * MIN_GEAR_SPEED を課しているので本物の 1速でも最低 1,828rpm になり、
+ * アイドル上限（実測 約1,500）との間に閾値を置けば正当な判定を失わない。 */
+const MIN_GEAR_RPM = 1700;
 
 /** 現在値からギヤを求める。判定できなければ null を返す。 */
 function currentGear() {
-  if (V.rpm === null || V.spd === null || V.rpm < 500 || V.spd < MIN_GEAR_SPEED) return null;
+  if (V.rpm === null || V.spd === null || V.rpm < MIN_GEAR_RPM || V.spd < MIN_GEAR_SPEED) return null;
   const ratio = V.rpm / (V.spd + SPD_HALF);
   let best = null, bd = Infinity;
   for (const n in R) {
