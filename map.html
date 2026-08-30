@@ -120,7 +120,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831d';
+const VERSION = 'v20260831e';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -621,35 +621,61 @@ async function fillGaps() {
     // 方位は少し離れた点から取る。直前直後だと雑音で向きが定まらない
     const pa = rows[g.fix[Math.max(0, g.ka - 5)]], pb = rows[g.fix[Math.min(g.fix.length-1, g.kb + 5)]];
     try {
-      const rt = await routeBetween(A, B, bearingDeg(pa, A), bearingDeg(B, pb));
-      if (!rt.ok) { notes.push(rt.reason); continue; }
-      if (rt.length < FILL_MIN_M) continue;
-      const vAvg = rt.length / T * 3.6;
-      if (vAvg < FILL_VVALID[0] || vAvg > FILL_VVALID[1]) {
-        notes.push(`経路 ${(rt.length/1000).toFixed(2)}km を ${T.toFixed(0)}s で走る想定になり平均 ${vAvg.toFixed(0)}km/h`);
-        continue;
-      }
+      const L0 = havM(A.lat, A.lon, B.lat, B.lon);
       const d = integrateDistance(A.t, B.t);
-      if (!d || d.total < FILL_MIN_M) { notes.push('車速の積分が取れない'); continue; }
-      const errPct = (d.total - rt.length) / rt.length * 100;
-      if (Math.abs(errPct) > FILL_TOL_PCT) {
-        notes.push(`経路長 ${(rt.length/1000).toFixed(2)}km と車速積分 ${(d.total/1000).toFixed(2)}km が ${errPct.toFixed(1)}% 乖離`);
+      if (!d) { notes.push('車速の積分が取れない'); continue; }
+      // 100m も動いていない途絶は埋める意味が無い。理由として数えもしない
+      if (d.total < FILL_MIN_M) continue;
+
+      const rt = await routeBetween(A, B, bearingDeg(pa, A), bearingDeg(B, pb));
+      let use = null, errPct = 0, straight = false;
+      if (rt.ok && rt.length >= FILL_MIN_M) {
+        const e = (d.total - rt.length) / rt.length * 100;
+        const v = rt.length / T * 3.6;
+        if (Math.abs(e) <= FILL_TOL_PCT && v >= FILL_VVALID[0] && v <= FILL_VVALID[1]) {
+          use = rt; errPct = e;
+        }
+      }
+      /* 経路が使えないとき、**車速積分が直線距離と一致するなら直線で引く**。
+       * トンネルは掘り抜きなので実際にほぼ直線で、実測 7 区間中 6 区間で
+       * 走行距離が直線距離の 0.95〜1.01 倍だった。OSRM が価値を持つのは
+       * 経路が実際に曲がっている区間だけ（実測 1 区間、D/L0=1.15）。
+       *
+       * 直線を引くこと自体は推測だが、**独立に得た 2 つの距離が一致する**
+       * ことが裏付けになる。距離が分からないまま端点を繋ぐのとは別物。
+       * 実測では龍王峡付近で OSRM が 2.3 倍の迂回路を返し（対岸の旧道か
+       * 通行不可扱い）、直線 750m / 積分 735m が一致した。 */
+      if (!use) {
+        const e0 = (d.total - L0) / L0 * 100;
+        const v0 = L0 / T * 3.6;
+        if (L0 >= FILL_MIN_M && Math.abs(e0) <= FILL_TOL_PCT
+            && v0 >= FILL_VVALID[0] && v0 <= FILL_VVALID[1]) {
+          const cum = [0, L0];
+          use = {pts: [{lat:A.lat, lon:A.lon}, {lat:B.lat, lon:B.lon}], cum, length: L0};
+          errPct = e0; straight = true;
+        }
+      }
+      if (!use) {
+        notes.push(rt.ok
+          ? `経路 ${(rt.length/1000).toFixed(2)}km・直線 ${(L0/1000).toFixed(2)}km のどちらも車速積分 ${(d.total/1000).toFixed(2)}km と合わない`
+          : `${rt.reason}、直線も車速積分と合わない`);
         continue;
       }
+      const rtU = use;
       /* 累積距離を経路長へ正規化して並べる。**時刻も持たせる。**
        * トンネル内でも OBD は生きているのでギヤと車速は実測値があり、
        * 推定なのは位置だけ。色と太さは実測と同じ意味で描ける。 */
-      const k = rt.length / d.total, pts = [];
+      const k = rtU.length / d.total, pts = [];
       let last = -1e9;
       for (const q of d.series) {
         const s = q.d * k;
         if (s - last < FILL_STEP_M) continue;
-        const p = alongRoute(rt, s);
+        const p = alongRoute(rtU, s);
         pts.push({lat:p.lat, lon:p.lon, t:q.t}); last = s;
       }
       pts.unshift({lat:A.lat, lon:A.lon, t:A.t});
       pts.push({lat:B.lat, lon:B.lon, t:B.t});
-      fills.push({pts, km: rt.length/1000, errPct});
+      fills.push({pts, km: rtU.length/1000, errPct, straight});
     } catch (e) { notes.push('経路探索に失敗: ' + e.message); }
     await new Promise(r => setTimeout(r, 300));   // 公開サーバなので間隔を空ける
   }
@@ -1016,8 +1042,10 @@ function statFills(base) {
   const ng = (fills.notes || []).length;
   const km = fills.reduce((a, f) => a + f.km, 0);
   const err = n ? Math.max(...fills.map(f => Math.abs(f.errPct))) : 0;
+  const st8 = fills.filter(f => f.straight).length;
   $('stat').textContent = base
-    + (n ? ` / 途絶を補完 ${n} 区間 ${km.toFixed(2)}km（乖離 最大 ${err.toFixed(1)}%）` : '')
+    + (n ? ` / 途絶を補完 ${n} 区間 ${km.toFixed(2)}km（乖離 最大 ${err.toFixed(1)}%`
+           + (st8 ? `、うち直線 ${st8}` : '') + '）' : '')
     + (ng ? ` / 補完できず ${ng} 区間` : '');
   if (ng) console.warn('[補完できず]', fills.notes);
 }
