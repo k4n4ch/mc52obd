@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260830g';
+const VERSION = 'v20260830h';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -837,7 +837,6 @@ function updateSpeedSub() {
 
 // ══ 記録 ═════════════════════════════════════════════════
 let recording = false;
-let bkTimer = null, bkSeq = 0;
 let obdRows = [];         // {t, rpm, spd, thr, load, ect, volt, fuelsys}
 let recT0 = 0;
 
@@ -855,29 +854,136 @@ function pushRow() {
   missAtLastRow = missTotal;
 }
 
+/* ══ 記録の下書き（IndexedDB） ═══════════════════════════════
+ * 停止を押すまで 1 バイトも保存されない作りなので、長時間の記録ではタブが
+ * 落ちると全部消える。かつてはダウンロード方式で 30 分ごとに写しを落として
+ * いたが、毎回**全行を直列化し直す**ためコストがログ長に比例し、実測で発火
+ * ごとに 5〜9 行を取りこぼしていた（t=3600 の方が t=1800 より必ず大きく、
+ * セッション全体では O(n^2)）。しかも Downloads のファイルはページから
+ * 消せないので散らかったまま残る。
+ *
+ * IndexedDB なら差分追記で O(n) に収まり、ページが所有するので正常終了時に
+ * 自分で消せる。書き込みに失敗しても記録本体は止めない。 */
+const DRAFT_DB = 'mc52draft';
+let draftDb = null, draftTimer = null, draftObd = 0, draftGps = 0;
+
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const q = indexedDB.open(DRAFT_DB, 1);
+    q.onupgradeneeded = () => {
+      const d = q.result;
+      if (!d.objectStoreNames.contains('obd')) d.createObjectStore('obd', {autoIncrement: true});
+      if (!d.objectStoreNames.contains('gps')) d.createObjectStore('gps', {autoIncrement: true});
+      if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
+    };
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error || new Error('open 失敗'));
+  });
+}
+
+function idbTx(db, stores, mode, fn) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(stores, mode);
+    fn(tx);
+    tx.oncomplete = () => res();
+    tx.onerror = tx.onabort = () => rej(tx.error || new Error('tx 失敗'));
+  });
+}
+
+async function draftStart() {
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+    draftDb = draftDb || await idbOpen();
+    await idbTx(draftDb, ['obd', 'gps', 'meta'], 'readwrite', tx => {
+      tx.objectStore('obd').clear();
+      tx.objectStore('gps').clear();
+      const m = tx.objectStore('meta');
+      m.clear();
+      m.put({recT0, proto: sessionProto, app: VERSION, p3: p3Delay, sf: sprkFront}, 'session');
+    });
+    draftObd = draftGps = 0;
+    clearInterval(draftTimer);
+    draftTimer = setInterval(draftFlush, 10000);
+  } catch (e) {
+    log('下書き保存を開始できない: ' + e.message, 'w');
+  }
+}
+
+async function draftFlush() {
+  if (!draftDb || !recording) return;
+  const o = obdRows.slice(draftObd), g = gpsBuf.slice(draftGps);
+  if (!o.length && !g.length) return;
+  try {
+    await idbTx(draftDb, ['obd', 'gps'], 'readwrite', tx => {
+      const so = tx.objectStore('obd'), sg = tx.objectStore('gps');
+      for (const r of o) so.put(r);
+      for (const r of g) sg.put(r);
+    });
+    draftObd += o.length; draftGps += g.length;
+  } catch (e) { /* 落ちても記録は続ける */ }
+}
+
+async function draftClear() {
+  clearInterval(draftTimer); draftTimer = null;
+  try {
+    draftDb = draftDb || await idbOpen();
+    await idbTx(draftDb, ['obd', 'gps', 'meta'], 'readwrite', tx => {
+      tx.objectStore('obd').clear();
+      tx.objectStore('gps').clear();
+      tx.objectStore('meta').clear();
+    });
+  } catch (e) { /* 消せなくても実害は無い */ }
+}
+
+/** 起動時に未完了の記録が残っていれば拾い上げる。 */
+async function draftRecover() {
+  if (recording) return;
+  try {
+    draftDb = draftDb || await idbOpen();
+    const got = await new Promise((res, rej) => {
+      const tx = draftDb.transaction(['obd', 'gps', 'meta'], 'readonly');
+      const a = tx.objectStore('obd').getAll();
+      const b = tx.objectStore('gps').getAll();
+      const c = tx.objectStore('meta').get('session');
+      tx.oncomplete = () => res({obd: a.result || [], gps: b.result || [], meta: c.result});
+      tx.onerror = () => rej(tx.error);
+    });
+    if (got.obd.length < 5) return;
+    const d = new Date(got.meta ? got.meta.recT0 : got.obd[0].t);
+    const p2 = n => String(n).padStart(2, '0');
+    showAlert(`前回の記録が残っている（${p2(d.getHours())}:${p2(d.getMinutes())} 開始 / ` +
+              `OBD ${got.obd.length} 行）。<b>タップで書き出す</b>`, 'warn');
+    $('alert').onclick = async () => {
+      $('alert').onclick = clearAlert;
+      obdRows = got.obd;
+      gpsBuf = got.gps;
+      recT0 = got.meta ? got.meta.recT0 : got.obd[0].t;
+      if (got.meta && got.meta.proto) sessionProto = got.meta.proto;
+      exportCsv('_recovered.csv');
+      if (gpsBuf.length) exportGpx();
+      obdRows = []; gpsBuf = [];
+      await draftClear();
+      log('前回の記録を書き出した', 'ok');
+      clearAlert();
+    };
+  } catch (e) { /* 復旧できなくても通常動作は妨げない */ }
+}
+
 function toggleRec() {
   recording = !recording;
   if (recording) {
     obdRows = []; gpsBuf = []; recT0 = Date.now();
     missTotal = 0; missAtLastRow = 0;
-    // 停止を押すまで 1 バイトも保存されない作りなので、長時間の記録では
-    // タブが落ちると全部消える。30 分ごとに保険の写しを書き出しておく。
-    // 正常に停止できたときは通し 1 本が別に出るので、写しは捨ててよい。
-    bkSeq = 0;
-    clearInterval(bkTimer);
-    bkTimer = setInterval(() => {
-      if (!recording || !obdRows.length) return;
-      bkSeq++;
-      exportCsv('_bk' + bkSeq + '.csv');
-      log('保険の写しを保存 (' + bkSeq + ')', 'w');
-    }, 30 * 60 * 1000);
+    clearAlert();
+    draftStart();
     if (gpsEnabled) startGps();
     log('記録開始', 'ok');
   } else {
-    clearInterval(bkTimer); bkTimer = null;
     log(`記録終了 OBD ${obdRows.length} 行 / GPS ${gpsBuf.length} 点`, 'ok');
+    // 書き出しが通ってから下書きを消す。例外が出たら下書きは残す
     if (obdRows.length) exportCsv();
     if (gpsBuf.length) exportGpx();
+    draftClear();
     if (!gpsEnabled) stopGps();
   }
   setChip('cRec', recording, true);
@@ -991,6 +1097,7 @@ $('bGps').onclick = () => {
   if (gpsEnabled) startGps(); else stopGps();
 };
 $('alert').onclick = clearAlert;   // タップで消す
+draftRecover();   // 未完了の記録が残っていれば拾い上げる
 
 // 要求前の待ち時間をその場で振れるようにする。P3min 説は棄却済みで既定は 0ms。
 // 走行中に欠測が多いと感じたときの逃げ道として残してある。
