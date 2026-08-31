@@ -63,15 +63,15 @@ button:disabled{opacity:.35}
 #ver{color:var(--dim); font-size:.68rem; opacity:.65; white-space:nowrap}
 #opts .info{flex:1 1 100%; display:flex; flex-wrap:wrap; gap:.5rem; align-items:baseline;
   padding-top:.35rem; border-top:1px solid var(--line)}
-#cur{margin-left:auto; color:var(--warn); font-size:.72rem; white-space:nowrap;
+#cur{margin-left:auto; color:var(--warn); font-size:.68rem; white-space:nowrap;
   font-variant-numeric:tabular-nums}
 
 /* ── 再生バー ── */
-#play{flex:0 0 auto; display:flex; flex-wrap:wrap; gap:.4rem; align-items:center;
-      padding:.35rem .6rem; background:var(--panel); border-bottom:1px solid var(--line)}
+#play{flex:0 0 auto; display:flex; flex-wrap:wrap; gap:.3rem; align-items:center;
+      padding:.35rem .45rem; background:var(--panel); border-bottom:1px solid var(--line)}
 #play button{padding:.28rem .5rem}
-#pSpd{display:flex; gap:.25rem; margin-left:.4rem}
-#pSpd button{padding:.28rem .42rem; font-size:.7rem; color:var(--dim)}
+#pSpd{display:flex; gap:.2rem; margin-left:.3rem}
+#pSpd button{padding:.28rem .3rem; font-size:.7rem; color:var(--dim)}
 #pSpd button.on{color:var(--fg); background:#25303f; border-color:var(--accent)}
 
 /* ── 本体 ── */
@@ -121,7 +121,6 @@ button:disabled{opacity:.35}
 <div id="bar">
   <input type="file" id="file" accept=".csv,text/csv">
   <button id="optBtn" title="判定の係数と丁数の設定、読み込んだログの診断">⚙ 設定</button>
-  <span id="cur"></span>
 </div>
 
 <!-- 走行を見るあいだは触らない設定。既定では畳んで地図と時系列に高さを譲る -->
@@ -140,9 +139,11 @@ button:disabled{opacity:.35}
 
 <div id="play">
   <button id="pPlay" disabled title="再生 / 一時停止">▶</button>
-  <button id="pBack" disabled title="5 秒戻す">⏪ 5s</button>
-  <button id="pFwd" disabled title="10 秒送る">10s ⏩</button>
+  <button id="pBack" disabled title="5 秒戻す">⏪5s</button>
+  <button id="pFwd" disabled title="10 秒送る">10s⏩</button>
   <span id="pSpd"></span>
+  <!-- 位置と全長。倍率や送り戻しと同じ量を指しているので再生バーに置く -->
+  <span id="cur"></span>
 </div>
 
 <div id="wrap">
@@ -153,7 +154,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260901b';
+const VERSION = 'v20260901c';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1168,7 +1169,7 @@ function setCursor(i) {
   const r = i >= 0 ? rows[i] : null;
   const [t0, t1] = tSpan();
   $('cur').textContent = r
-    ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)}（${r.t.toFixed(0)}s）` : '';
+    ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)} (${r.t.toFixed(0)}s)` : '';
   for (const s of SERIES) {
     const el = $('v_' + s.key);
     const v = r ? r[s.key] : null;
