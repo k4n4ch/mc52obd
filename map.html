@@ -51,7 +51,15 @@ button{font:inherit; font-size:.72rem; font-weight:600; color:var(--fg); backgro
 button:active{background:#202834}
 button:disabled{opacity:.35}
 #tolMax{color:var(--mute)}
-#stat{margin-left:auto; color:var(--dim); font-size:.72rem; white-space:nowrap}
+#opts{flex:0 0 auto; display:flex; flex-wrap:wrap; gap:.5rem; align-items:center;
+      padding:.45rem .6rem; background:#0e131a; border-bottom:1px solid var(--line);
+      font-size:.75rem}
+#opts[hidden]{display:none}
+#opts label{display:flex; align-items:center; gap:.3rem; color:var(--dim)}
+#optBtn.on{background:#25303f; border-color:var(--accent)}
+/* 折り返しを許す。nowrap だと画面が狭いとき右端で見切れて、補完の結果など
+   後ろに付く情報が読めなくなる */
+#stat{margin-left:auto; color:var(--dim); font-size:.72rem; min-width:0}
 #ver{color:var(--dim); font-size:.68rem; opacity:.65; white-space:nowrap}
 #cur{color:var(--warn); font-size:.72rem; white-space:nowrap; font-variant-numeric:tabular-nums}
 
@@ -109,6 +117,14 @@ button:disabled{opacity:.35}
 
 <div id="bar">
   <input type="file" id="file" accept=".csv,text/csv">
+  <button id="optBtn" title="判定の係数と丁数の設定">⚙ 設定</button>
+  <span id="ver"></span>
+  <span id="stat">CSV を読み込む</span>
+  <span id="cur"></span>
+</div>
+
+<!-- 走行を見るあいだは触らない設定。既定では畳んで地図と時系列に高さを譲る -->
+<div id="opts" hidden>
   <span id="kdiag" title="k は車速信号の経路だけで決まる閉じた定数で、車両ごとの較正を要しない。このログから当てた値を併記するので、外れていれば前提の崩れに気づける">k —</span>
   <label title="隣接する段の窓が重ならない上限まで。上限は諸元から算出している">窓±
     <input type="number" id="tol" step="0.5" min="0.5" value="4">% <span id="tolMax"></span></label>
@@ -116,10 +132,6 @@ button:disabled{opacity:.35}
   <label title="ECU は純正 14T/36T 前提で換算する。後は 36T 固定（MC52 は他の設定が売られていない）。表示車速のみ補正し、ギヤ判定は生値で行う">前丁数
     <select id="sf"></select></label>
   <button id="estsp" disabled title="GPS 速度との一致から前後の丁数を推定する。速度比だけでは一意に決まらないため候補も出す">丁数推定</button>
-  <button id="tbl" disabled>表</button>
-  <span id="stat">CSV を読み込む</span>
-  <span id="cur"></span>
-  <span id="ver"></span>
 </div>
 
 <div id="play">
@@ -137,7 +149,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260831m';
+const VERSION = 'v20260901a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1168,22 +1180,6 @@ function setCursor(i) {
 }
 
 // ── 表（色だけに頼らないための代替表現）───────────────────
-function showTable() {
-  const w = window.open('', '_blank');
-  if (!w) return;
-  const head = ['t_sec','rpm','速度','ギヤ','スロットル','水温','電圧','lat','lon'];
-  let html = `<meta charset="utf-8"><title>MC52 ログ</title>
-  <style>body{font:12px/1.5 -apple-system,sans-serif;background:#fff;color:#111;padding:1rem}
-  table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.15rem .4rem;text-align:right}
-  th{background:#eee}</style><table><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr>`;
-  for (const r of rows) {
-    html += '<tr>' + [r.t?.toFixed(2), r.rpm, r.spd, r.gear ?? '', r.thr?.toFixed(1),
-      r.ect, r.volt?.toFixed(2), r.lat?.toFixed(6) ?? '', r.lon?.toFixed(6) ?? '']
-      .map(v => `<td>${v ?? ''}</td>`).join('') + '</tr>';
-  }
-  w.document.write(html + '</table>');
-  w.document.close();
-}
 
 // ── 更新 ─────────────────────────────────────────────────
 function refresh() {
@@ -1232,7 +1228,6 @@ $('file').onchange = e => {
       drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
       computeRatios();           // fitK は比を見るので先に用意する
       $('estsp').disabled = false;
-      $('tbl').disabled = false;
       for (const id of ['pPlay', 'pBack', 'pFwd']) $(id).disabled = false;
       playT = rows[0].t; setPlay(false);
       showKDiag();
@@ -1306,6 +1301,17 @@ function applyEstimate(quiet) {
 $('estsp').onclick = () => applyEstimate(false);
 
 $('align').onchange = () => { computeRatios(); showKDiag(); refresh(); };
-$('tbl').onclick = showTable;
+const OPTS_KEY = 'mc52_opts';
+function setOpts(open) {
+  $('opts').hidden = !open;
+  $('optBtn').classList.toggle('on', open);
+  try { localStorage.setItem(OPTS_KEY, open ? '1' : '0'); } catch {}
+  // 高さが変わるので地図と時系列を追随させる
+  if (map) map.invalidateSize();
+  drawCharts();
+}
+$('optBtn').onclick = () => setOpts($('opts').hidden);
+try { if (localStorage.getItem(OPTS_KEY) === '1') setOpts(true); } catch {}
+
 addEventListener('resize', () => { drawCharts(); if (map) map.invalidateSize(); });
 </script>
