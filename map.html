@@ -39,10 +39,11 @@ body{
      padding:.45rem .6rem; background:var(--panel); border-bottom:1px solid var(--line);
      font-size:.75rem}
 #bar label{display:flex; align-items:center; gap:.3rem; color:var(--dim)}
-/* 行が空いたのでファイル名を長く見せる。狭い画面では縮んで ⚙ を追い出さない
-   ように min-width:0 を効かせる（Chrome は入りきらない分を中略で詰める） */
+/* ⚙ の位置だけ右端に固定し、余りは全部ファイル名に使わせる。狭い画面では
+   min-width:0 で縮むので ⚙ を次の行へ追い出さない（Chrome は入りきらない
+   分を中略で詰める） */
 input[type=file]{font:inherit; font-size:.72rem; color:var(--dim);
-  flex:1 1 auto; min-width:0; max-width:24rem}
+  flex:1 1 auto; min-width:0}
 input[type=number]{font:inherit; width:4.4rem; background:#0c1016; color:var(--fg);
   border:1px solid var(--line); border-radius:.25rem; padding:.2rem .3rem}
 /* 丁数は任意値でなく選択にする。非現実的な値を入れられないうえ、総当たりの
@@ -59,6 +60,7 @@ button:disabled{opacity:.35}
       font-size:.75rem}
 #opts[hidden]{display:none}
 #opts label{display:flex; align-items:center; gap:.3rem; color:var(--dim)}
+#optBtn{margin-left:auto}
 #optBtn.on{background:#25303f; border-color:var(--accent)}
 /* 折り返しを許す。nowrap だと画面が狭いとき右端で見切れて、補完の結果など
    後ろに付く情報が読めなくなる */
@@ -157,7 +159,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260901d';
+const VERSION = 'v20260901e';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
