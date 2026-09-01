@@ -36,6 +36,7 @@
 | `tools/gearcal.py` | ギヤ較正（単一係数 k のフィット）。**k を定数化したので役割は終えた** |
 | `tools/p3sweep.py` | 要求前の待ちを掃引。P3min 説の棄却に使った |
 | `tools/gearing.py` | 走行余力の表と図を生成。`GEARING.md` の全数値を再現。実機不要 |
+| `tools/importlogs.py` | ダウンロード先の走行ログを `private/` へ集める。一覧も出す |
 | `tools/cutlog.py` | 走行ログの時間区間を切り出す（CSV と GPX を同時に） |
 | `tools/shifttime.py` | 絶対時刻をずらす。公開用に走行日時を伏せる |
 | `index.html` | スマホ用モニタ `v20260831a`。**実走 3 時間で動作確認済み** |

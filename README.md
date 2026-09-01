@@ -343,6 +343,11 @@ python3 tools/gearing.py
 python3 tools/gearing.py --svg      # docs/ に図を生成
 python3 tools/gearing.py --verify   # 実走ログとの突合
 
+# スマホから降ろしたログを private/ へ集める
+python3 tools/importlogs.py            # 取り込む（元は残す）
+python3 tools/importlogs.py --move     # 一致を確認してから元を消す
+python3 tools/importlogs.py --list     # private/ の中身を一覧する
+
 # 走行ログから時間区間を切り出す（例示用に速度超過を含まない区間を取る）
 python3 tools/cutlog.py <csv> <開始秒> <終了秒> -o out.csv
 
@@ -350,7 +355,9 @@ python3 tools/cutlog.py <csv> <開始秒> <終了秒> -o out.csv
 python3 tools/shifttime.py <csv> --days -2 --time -3:33
 ```
 
-`cutlog.py` と `shifttime.py` は同名の `.gpx` があれば一緒に処理する。
+`cutlog.py` と `shifttime.py` は同名の `.gpx` があれば一緒に処理する。`importlogs.py` も
+CSV と GPX を対で扱い、**同名で中身が違うファイルは決して上書きしない**（走行ログは
+撮り直せないので、衝突は報告だけして手を止める）。
 
 ## スキャナの動作
 
