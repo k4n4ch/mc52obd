@@ -78,23 +78,33 @@ def top_of_range(front, gear, ref):
 
 # ---------------------------------------------------------------- 実測突合
 def verify():
-    """ログの 6 速定常点と計算値を突合する（フロント 15T で走行）。"""
-    K, TOL = 1.0148, 0.05           # ギア判定の較正係数と許容幅
-    GF = 1 / 0.935                  # OBD 車速 -> 実車速（0D/GPS の実測値）
+    """ログの 6 速定常点と計算値を突合する（フロント 15T で走行）。
+
+    判定はアプリ・ビュワーと同じ規則に揃えてある。`0D` は切り捨てなので
+    真値は +0.5、`k` は較正しない閉じた定数、許容は量子化ぶん `0.5/車速` を
+    足す、車速 8km/h 未満と回転数 1,700rpm 未満は使わない。実車速への換算も
+    ECU が前提とする 14T との丁数比そのもの（15/14）を使う。
+    """
+    K, TOL = 1.0057, 0.04           # 閉じた定数と判定窓（FINDINGS.md 参照）
+    HALF = 0.5                      # 0D は切り捨てなので真値は +0.5
+    GF = 15 / 14                    # OBD 車速 -> 実車速（丁数比。メーター誤差と同値）
     R = {n: PRIMARY * GEAR[n] * (REAR / 14) / (CIRC * 60 / 1000) for n in GEAR}
 
     def gear_of(rpm, spd):
-        if spd <= 1 or rpm < 500:
+        if spd < 8 or rpm < 1700:
             return None
-        ratio, best = rpm / spd, None
+        s = spd + HALF
+        ratio, best = rpm / s, None
         for n in R:
             e = abs(ratio / (K * R[n]) - 1)
-            if e < TOL and (best is None or e < best[1]):
+            if e < TOL + 0.5 / s and (best is None or e < best[1]):
                 best = (n, e)
         return best[0] if best else None
 
     buckets = {}
-    files = sorted(glob.glob('private/*.csv'))
+    # 走行の全尺だけを見る。`private/` には公開検討で切り出した区間も置いてあり、
+    # 一括で拾うと同じ行を二重に数える
+    files = sorted(glob.glob('private/mc52_*.csv') + glob.glob('private/cb250r_*.csv'))
     for f in files:
         c = []
         for r in csv.DictReader(open(f)):
@@ -113,10 +123,10 @@ def verify():
             sp = [w[2] for w in win]
             if max(sp) - min(sp) > 2:             # 定常（±2 km/h 以内）
                 continue
-            buckets.setdefault(int(spd * GF // 5) * 5, []).append((rpm, thr, ld))
+            buckets.setdefault(int((spd + HALF) * GF // 5) * 5, []).append((rpm, thr, ld))
 
     if not buckets:
-        print(f'ログが見つからない（探索先 private/*.csv、{len(files)} 件）')
+        print(f'ログが見つからない（探索先 private/ の走行ログ、{len(files)} 件）')
         return
     print('## 実測との突合（15T・6 速・定常）\n')
     print(f'{"実車速":>10} {"n":>4} {"実測rpm":>8} {"計算rpm":>8} {"差":>7} '
