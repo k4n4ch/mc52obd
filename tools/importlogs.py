@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""スマホから降ろした走行ログを `private/` へ取り込む。
+"""スマホから降ろした走行ログを `private/logs/` へ取り込む。
 
-ブラウザのダウンロード先に溜まったログを、位置情報を含むファイルの唯一の
-置き場である `private/` へ集める。CSV と同名の GPX は対で扱う。
+ブラウザのダウンロード先に溜まったログを `private/logs/` へ集める。CSV と
+同名の GPX は対で扱う。`private/` 直下は位置情報を含むデータ全般の置き場で、
+走行ログはその下の `logs/` に分けている。
 
     python3 tools/importlogs.py              # 取り込む（元は残す）
     python3 tools/importlogs.py --move       # 一致を確認してから元を消す
-    python3 tools/importlogs.py --list       # private/ の中身を一覧する
+    python3 tools/importlogs.py --list       # private/logs/ の中身を一覧する
     python3 tools/importlogs.py --from DIR   # 取り込み元を指定する
 
 **同名で中身が違うファイルは決して上書きしない。** 走行ログは撮り直せない
@@ -25,7 +26,7 @@ import shutil
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-DEST = REPO / 'private'
+DEST = REPO / 'private' / 'logs'
 # 車両ログのファイル名。`mc52_` が現行、`cb250r_` は 2026-08 中頃までの旧名
 PATTERNS = ('mc52_*.csv', 'cb250r_*.csv')
 
@@ -92,11 +93,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--from', dest='src', default='~/Downloads', help='取り込み元')
     ap.add_argument('--move', action='store_true', help='一致を確認してから元を消す')
-    ap.add_argument('--list', action='store_true', help='private/ の中身を一覧する')
+    ap.add_argument('--list', action='store_true', help='private/logs/ の中身を一覧する')
     ap.add_argument('--include-bk', action='store_true', help='_bk も取り込む')
     args = ap.parse_args()
 
-    DEST.mkdir(exist_ok=True)
+    DEST.mkdir(parents=True, exist_ok=True)
     if args.list:
         return do_list()
 

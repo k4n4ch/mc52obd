@@ -343,10 +343,10 @@ python3 tools/gearing.py
 python3 tools/gearing.py --svg      # docs/ に図を生成
 python3 tools/gearing.py --verify   # 実走ログとの突合
 
-# スマホから降ろしたログを private/ へ集める
+# スマホから降ろしたログを private/logs/ へ集める
 python3 tools/importlogs.py            # 取り込む（元は残す）
 python3 tools/importlogs.py --move     # 一致を確認してから元を消す
-python3 tools/importlogs.py --list     # private/ の中身を一覧する
+python3 tools/importlogs.py --list     # private/logs/ の中身を一覧する
 
 # 走行ログから時間区間を切り出す（例示用に速度超過を含まない区間を取る）
 python3 tools/cutlog.py <csv> <開始秒> <終了秒> -o out.csv
@@ -383,7 +383,7 @@ CSV と GPX を対で扱い、**同名で中身が違うファイルは決して
 予定があり、その際に生成されるログが対象になる。GPS ほど直接的ではないが、車速の時系列も
 時刻と組み合わせれば経路推定の手がかりになりうるため、扱いを揃える。
 
-- 生の軌跡・GPS ログは **`private/`** に置く。`.gitignore` で弾いてある
+- 生の軌跡・GPS ログは **`private/logs/`** に置く。`.gitignore` で `private/` ごと弾いてある
 - リポジトリに残すのは**解析結果のみ**（ギヤ比のクラスタ、判定閾値、統計値など）
 - Car Scanner 等スマホアプリの CSV エクスポートは位置情報列を含みうる。`private/` 経由で
   扱い、`results/` に直接置かない

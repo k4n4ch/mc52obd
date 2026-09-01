@@ -422,7 +422,7 @@ n 計 1,047 点。中央値 +0.70%、n で重み付けた平均 +0.78%、範囲 
 ```
 python3 tools/gearing.py            # 全表を出力
 python3 tools/gearing.py --svg      # docs/ に図を再生成
-python3 tools/gearing.py --verify   # 実測突合のみ（private/*.csv が必要）
+python3 tools/gearing.py --verify   # 実測突合のみ（private/logs/ のログが必要）
 ```
 
 諸元・推定トルク曲線・仮定値は [`tools/gearing.py`](tools/gearing.py) の冒頭に定数として
@@ -430,10 +430,10 @@ python3 tools/gearing.py --verify   # 実測突合のみ（private/*.csv が必�
 足りる。図も同じ定数から生成しているので、値を変えれば表と図が同時に追随する（外部ライブラリ
 は使っていない）。
 
-図 5（使用密度）だけは実走ログを読むので、`private/` にログが無ければ生成されない
+図 5（使用密度）だけは実走ログを読むので、`private/logs/` にログが無ければ生成されない
 （他の 4 枚と全ての表はログ非依存）。
 
-実走ログは個人の移動履歴を含むため `private/` に置き、リポジトリには含めていない
+実走ログは個人の移動履歴を含むため `private/logs/` に置き、リポジトリには含めていない
 （[`private/README.md`](private/README.md)）。突合表以外の数値はログ非依存で再現できる。
 
 ## 出典

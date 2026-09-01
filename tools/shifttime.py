@@ -8,7 +8,7 @@
 `t_sec` は相対値なので触らない。CSV の `iso_time` と GPX の `<time>` を同じ量
 だけ動かす。同名の `.gpx` があれば一緒に処理する。
 
-    python3 tools/shifttime.py private/seg....csv --days -2 --time -3:33
+    python3 tools/shifttime.py private/logs/seg....csv --days -2 --time -3:33
 """
 import argparse, csv, datetime as dt, os, re, sys
 

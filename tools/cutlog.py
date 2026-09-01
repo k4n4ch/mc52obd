@@ -9,7 +9,7 @@
 GPX は OBD と独立に測位しているので点数も間隔も CSV とは一致しない。
 `<trkseg>` の切れ目（測位途絶）は元の分割を保つ。
 
-    python3 tools/cutlog.py private/mc52_....csv 3286 3883 -o out.csv
+    python3 tools/cutlog.py private/logs/mc52_....csv 3286 3883 -o out.csv
 """
 import argparse, csv, os, re, sys
 

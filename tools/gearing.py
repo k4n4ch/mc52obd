@@ -102,9 +102,10 @@ def verify():
         return best[0] if best else None
 
     buckets = {}
-    # 走行の全尺だけを見る。`private/` には公開検討で切り出した区間も置いてあり、
-    # 一括で拾うと同じ行を二重に数える
-    files = sorted(glob.glob('private/mc52_*.csv') + glob.glob('private/cb250r_*.csv'))
+    # 走行の全尺だけを見る。`private/logs/` には公開検討で切り出した区間も
+    # 置いてあり、一括で拾うと同じ行を二重に数える
+    files = sorted(glob.glob('private/logs/mc52_*.csv')
+                   + glob.glob('private/logs/cb250r_*.csv'))
     for f in files:
         c = []
         for r in csv.DictReader(open(f)):
@@ -126,7 +127,7 @@ def verify():
             buckets.setdefault(int((spd + HALF) * GF // 5) * 5, []).append((rpm, thr, ld))
 
     if not buckets:
-        print(f'ログが見つからない（探索先 private/ の走行ログ、{len(files)} 件）')
+        print(f'ログが見つからない（探索先 private/logs/、{len(files)} 件）')
         return
     print('## 実測との突合（15T・6 速・定常）\n')
     print(f'{"実車速":>10} {"n":>4} {"実測rpm":>8} {"計算rpm":>8} {"差":>7} '
@@ -542,7 +543,7 @@ def fig_ranges(path):
     open(path, 'w', encoding='utf-8').write('\n'.join(s))
 
 
-def fig_usage(path, logdir='private'):
+def fig_usage(path, logdir='private/logs'):
     """実走行の使用点を 車速×回転数 の平面に散布する。
 
     理論のギア線図（fig4）と同じ平面に、実測がどこに落ちているかを描く。
