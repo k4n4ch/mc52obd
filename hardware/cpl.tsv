@@ -25,5 +25,5 @@
 "J2"	"B-2100S04P-A110"	"HDR-TH_4P-P2.54-V-M"	"46.482mm"	"12.7mm"	"46.482mm"	"12.7mm"	"46.482mm"	"8.89mm"	"4"	"T"	"90"	"No"	"B-2100S04P-A110"	""	""	"LCSC"	"https://item.szlcsc.com/datasheet/B-2100S04P-A110/125653.html"
 "J3"	"B-2100S05P-A110"	"HDR-TH_5P-P2.54-V-M"	"46.482mm"	"29.21mm"	"46.482mm"	"29.21mm"	"46.482mm"	"24.13mm"	"5"	"T"	"90"	"No"	"B-2100S05P-A110"	""	""	"LCSC"	"https://item.szlcsc.com/datasheet/B-2100S05P-A110/125654.html"
 "U1"	"AP63203WU-7"	"TSOT-26_L2.9-W1.6-P0.95-LS2.8-BL"	"15.24mm"	"33.02mm"	"15.24mm"	"33.02mm"	"14.29mm"	"31.821mm"	"6"	"T"	"0"	"Yes"	"AP63203WU-7"	""	""	"LCSC"	"https://item.szlcsc.com/datasheet/AP63203WU-7/832852.html"
-"U2"	"ESP32-S3-WROOM-1-N16R8"	"WIRELM-SMD_ESP32-S3-WROOM-1"	"33.02mm"	"27.178mm"	"33.02mm"	"27.178mm"	"24.27mm"	"36.073mm"	"49"	"T"	"0"	"Yes"	"2.4GHz"	"2.4GHz"	""	"LCSC"	"https://item.szlcsc.com/datasheet/ESP32-S3-WROOM-1-N16R8/3198300.html"
+"U2"	"ESP32-S3-WROOM-1-N16R8"	"WIRELM-SMD_ESP32-S3-WROOM-1"	"33.02mm"	"23.419mm"	"33.02mm"	"23.419mm"	"24.27mm"	"32.314mm"	"49"	"T"	"0"	"Yes"	"2.4GHz"	"2.4GHz"	""	"LCSC"	"https://item.szlcsc.com/datasheet/ESP32-S3-WROOM-1-N16R8/3198300.html"
 "U3"	"E-L9637D013TR"	"SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL"	"10.16mm"	"17.78mm"	"10.16mm"	"17.78mm"	"8.255mm"	"15.179mm"	"8"	"T"	"0"	"Yes"	"E-L9637D013TR"	""	""	"LCSC"	"https://item.szlcsc.com/datasheet/E-L9637D013TR/164371.html"
