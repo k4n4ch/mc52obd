@@ -6,9 +6,21 @@ CB250R / MC52 の K-Line を ELM327 を介さず直接叩き、**噴射時間**�
 
 - 回路図: EasyEDA Pro のプロジェクト `MC52 KLine Logger`（ローカル、未公開）
 - 部品表: [`bom.csv`](bom.csv)
-- ネットリスト: [`netlist.md`](netlist.md)
+- ネットリスト: [`netlist.md`](netlist.md)（読みやすい形）/ [`netlist.enet`](netlist.enet)（EasyEDA 出力）
+- 生成に使ったスクリプトは `work/easyeda/`（リポジトリ外）
 
-**現状は回路図まで。PCB は未着手。** 残作業は末尾の「残っている工程」に挙げる。
+**現状は回路図と PCB の部品配置まで。配線が残っている。** 詳細は末尾の「残っている工程」。
+
+| | 状態 |
+|---|---|
+| 回路図 | 28 部品 / 17 ネット。採番済み、保存済み |
+| PCB 部品配置 | 28 部品、パッドにネット割当済み（88 パッド） |
+| 基板外形 | 50 × 40mm。ガーバーで 49.9999 × 39.99992mm を確認 |
+| 取付穴 | M3（φ3.2 非メッキ）を四隅、端から 3.5mm |
+| **配線** | **未実施** |
+| BOM | [`bom.csv`](bom.csv)（在庫つき）/ [`bom_easyeda.tsv`](bom_easyeda.tsv)（EasyEDA 出力）。18 品種で一致 |
+| 実装座標 | [`cpl.tsv`](cpl.tsv)。**配線前の暫定値** |
+| ガーバー | 出力は通るが未配線なので発注不可。リポジトリに置いていない |
 
 ## 電源を 1 系統にした（設計変更）
 
@@ -87,38 +99,75 @@ CB250R / MC52 の K-Line を ELM327 を介さず直接叩き、**噴射時間**�
 **していないこと**
 
 - **回路シミュレーションも実機確認もしていない。** 紙の上の設計
-- ERC / DRC 未実施（PCB が無いため）
+- ERC / DRC 未実施
 - 降圧の熱設計を検討していない。`U1` は 12V→3.2V で効率 8 割としても
   ESP32 のピーク 0.5A なら損失 0.4W 程度で、TSOT-26 なら成立する見込みだが未計算
 
+## EasyEDA API で分かったこと
+
+このスキル（`easyeda/easyeda-api-skill`）のドキュメントには**実行時に存在しない
+メソッドが載っている**。この構成（デスクトップ 3.2.149 / pro-api 0.2.53）で
+実際に使えたものと使えなかったものを記録する。
+
+| | 状態 |
+|---|---|
+| `sch_PrimitiveComponent.create` / `getAllPins` / `setState_Designator` | 動く |
+| `sch_PrimitiveWire.create(line, net)` | 動く。**ネット名は配線に持たせられる** |
+| `sch_PrimitiveAttribute.createNetLabel` | **例外も出さず `undefined`**（未実装） |
+| `pcb_PrimitiveComponent.create` / `pcb_PrimitivePad.setState_Net` | 動く |
+| `pcb_PrimitiveLine.create` / `pcb_PrimitivePad.create` | 動く |
+| `pcb_ManufactureData.get{Bom,PickAndPlace,Gerber,Netlist}File` | 動く |
+| `pcb_Document.importChanges()` | **`true` を返すが何も起きない** |
+| `pcb_Document.autoLayout` / `autoRouting` | **実行時オブジェクトに存在しない** |
+| `pcb_Drc.check()` | 存在しない。あるのは `startRealTimeDrc` 系のみ |
+
+要点は 2 つ。
+
+- **回路図 → PCB の転送は API では効かない。** 本書の PCB は `importChanges` を
+  使わず、**同じネット定義から PCB 側の部品とパッドを直接生成**して作った。
+  結果は転送したものと等価になる（`netlist.enet` で確認できる）
+- **enum は実行文脈に無い。** `EPCB_LayerId.TOP` と書くと `is not defined` に
+  なるので、数値（TOP=1、MULTI=12、BOARD_OUTLINE=11）で渡す必要がある
+
+**EasyEDA 本体が落ちやすい。** API を連続で投げると 3 回落ちた（拡張は自動で
+再接続する）。1 リクエストに詰め込まず、間に待ちを入れること。
+
 ## 残っている工程
 
-**1. 回路図 → PCB の転送（GUI 操作が要る）**
+**1. 配線**
 
-EasyEDA の `pcb_Document.importChanges()` は API から呼ぶと `true` を返すだけで
-何も起きない（ダイアログを開く実装とみられる）。**PCB エディタで手動実行する。**
+`autoRouting()` が実行時に無いため、API からは配線できない。取れる道は 2 つ。
 
-- `Board1_2` の `PCB1` を開く → `Design` → `Import Changes` → 適用
+- **GUI の自動配線を使う。** PCB エディタで `Route` → `Auto Route`
+- **外部ルータを使う。** `pcb_ManufactureData.getAutoRouteJsonFile()` で書き出し、
+  `pcb_Document.importAutoRouteSesFile()` / `importAutoRouteJsonFile()` で戻せる。
+  API だけで完結させたい場合はこちら
 
-**2. 基板外形・部品配置・配線**
+いずれにせよ **`U1` 周りは自動配線に任せない。** スイッチングノードのループ面積が
+効くため、`U1` / `L1` / `C1` / `C4` は手で詰める。
 
-- 外形は 50×40mm、四隅 M3、コネクタは短辺側を想定（防水ケース前提の仮決め）
-- `pcb_Document.autoLayout()` と `autoRouting()` が API にあるので、転送さえ
-  済めば自動化できる見込み
-- **`U1` 周りは自動配線に任せない。** スイッチングノードのループ面積が効くため、
-  `U1` / `L1` / `C1` / `C4` は手で詰める
-
-**3. 5V へ戻す余地を残す**
+**2. 5V へ戻す余地を残す**
 
 上記の留保どおり `VCC = 3.3V` は試験値ではない。**`R1` を差し替えるだけで 5V に
 上げられる**が、それだけでは ESP32 の入力が 5V を受けてしまう。`U3` の `RX` と
 ESP32 の間に**分圧抵抗 2 本ぶんのパターン（通常は 0Ω と未実装）を置いておく**と、
 基板を作り直さずに逃げられる。PCB 設計時に入れる。
 
-**4. 製造データ**
+**3. 製造データの出し直し**
 
-`getGerberFile()` / `getBomFile()` / `getPickAndPlaceFile()` が API にあるので、
-配線が終われば自動で出せる。**発注（`placePcbOrder()` 等）は行わない。**
+BOM・実装座標・ガーバーの書き出しは**すでに動作を確認済み**（`work/easyeda/export_mfg.py`）。
+配線が終わったら同じ手順で出し直す。現在置いてある `cpl.tsv` は配線前の暫定値で、
+配置を動かせば変わる。
+
+**発注（`placePcbOrder()` / `placeSmtComponentsOrder()` 等）は行っていない。**
+課金が発生するため、明示の指示があるまで触らない。
+
+**4. 設計として詰めていない点**
+
+- 降圧の熱設計は未計算（上記「していないこと」）
+- ERC / DRC 未実施。`pcb_Drc.check()` が無いので GUI で回す
+- `U2` のアンテナ直下の銅箔除去（キープアウト）を設定していない。基板上端に
+  寄せてはあるが、**ベタ GND を流す前に必ず設定する**
 
 ## コスト
 
