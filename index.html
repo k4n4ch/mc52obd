@@ -270,7 +270,16 @@ const gearK = 1.0057;
 const STOCK_FRONT = 14, STOCK_REAR = 36;
 const FRONT_RANGE = [12, 15];
 let sprkFront = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
-const speedCorr = () => sprkFront / STOCK_FRONT;
+/* 表示係数は「丁数比 × 校正トリム」。
+ *
+ * 丁数比は諸元から決まる理論値で、これが既定（トリム = 1）。ただし実測では
+ * `0D`/GPS が丁数比だけの予測より約 0.9% 高い。ECU の想定円周が実際の転がり
+ * 円周より大きいためで、**タイヤの摩耗・空気圧で変わる実在の量**。だから
+ * ギヤ判定の `k`（閉じた定数で較正しない）とは性格が違い、ここは個体ごとの
+ * 校正に意味がある。トリムはビュワーの「車速校正」が GPS から求めて書く。 */
+let speedTrim = parseFloat(localStorage.getItem('mc52_strim')) || 1;
+if (!(speedTrim > 0.8 && speedTrim < 1.25)) speedTrim = 1;
+const speedCorr = () => sprkFront / STOCK_FRONT * speedTrim;
 /* 判定窓の上限は諸元から決まる。窓を |比/予測 - 1| ≤ t と定義しているので、
  * 隣接する 2 段の窓が重ならない条件は t < (s-1)/(s+1)（s は隣接段の比）。
  * 全段に同じ窓を使うため、最も狭い 5-6速が上限を決めて 5.81%。

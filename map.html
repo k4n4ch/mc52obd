@@ -137,6 +137,7 @@ button:disabled{opacity:.35}
   <label title="ECU は純正 14T/36T 前提で換算する。後は 36T 固定（MC52 は他の設定が売られていない）。表示車速のみ補正し、ギヤ判定は生値で行う">前丁数
     <select id="sf"></select></label>
   <button id="estsp" disabled title="GPS 速度との一致から前後の丁数を推定する。速度比だけでは一意に決まらないため候補も出す">丁数推定</button>
+  <button id="calsp" disabled title="表示車速が GPS と一致するよう校正トリムを求める。丁数比だけでは実測と 1% 弱ずれるため（ECU の想定円周と実際の転がり円周の差）。走行画面と共有する">車速校正</button>
   <!-- 行数・確定率・補完の結果は読み込み時に一度見れば足りる診断で、走行を
        見返すあいだは要らない。補完を採らなかった理由もここへ出る -->
   <div class="info"><span id="stat">CSV を読み込む</span><span id="ver"></span></div>
@@ -234,7 +235,15 @@ let isolate = null;   // null=全ギヤ表示、1-6=そのギヤだけ強調
  * 設定は走行画面と localStorage を共有する（同一オリジン）。 */
 const STOCK_FRONT = 14, STOCK_REAR = 36;
 const sprkFront = () => parseInt($('sf').value, 10) || STOCK_FRONT;
-const speedCorr = () => sprkFront() / STOCK_FRONT;
+/* 表示係数 = 丁数比 × 校正トリム。丁数比は理論値（既定、トリム = 1）。
+ * トリムは下の calibrateSpeed() が GPS から求めて localStorage に書き、
+ * 走行画面と共有する。ギヤ判定には掛けない（`k` は生値に対して定義される）。 */
+const TRIM_KEY = 'mc52_strim';
+function speedTrim() {
+  const v = parseFloat(localStorage.getItem(TRIM_KEY));
+  return (v > 0.8 && v < 1.25) ? v : 1;
+}
+const speedCorr = () => sprkFront() / STOCK_FRONT * speedTrim();
 
 /**
  * GPS 速度との一致からスプロケット丁数を推定する。
@@ -1242,6 +1251,7 @@ $('file').onchange = e => {
       drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
       computeRatios();           // fitK は比を見るので先に用意する
       $('estsp').disabled = false;
+      $('calsp').disabled = false;
       for (const id of ['pPlay', 'pBack', 'pFwd']) $(id).disabled = false;
       playT = rows[0].t; setPlay(false);
       showKDiag();
@@ -1313,6 +1323,35 @@ function applyEstimate(quiet) {
     + ` / GPS ${e.n} 点）` + (second ? ` — 次点 ${second.front}T (${(second.err * 100).toFixed(2)}%)` : '');
 }
 $('estsp').onclick = () => applyEstimate(false);
+
+/**
+ * 表示車速が GPS と一致するよう校正トリムを求めて保存する。
+ *
+ * 丁数比は諸元から決まるが、実測の `0D`/GPS はそれより約 0.9% 高い。ECU の
+ * 想定円周が実際の転がり円周より大きいためで、タイヤの摩耗・空気圧で動く。
+ * ギヤ判定の `k` と違って**較正すべき自由度が実在する**ので、ここは実測に合わせる。
+ *
+ * **45km/h 未満は使わない。** `0D` の 1km/h 量子化と GPS 側のノイズで比が上へ
+ * 跳ねる（実測で 15-29km/h 帯は 0.967、45km/h 以上は 0.940 で平ら）。
+ */
+function calibrateSpeed() {
+  let so = 0, sg = 0, n = 0;
+  for (const r of rows) {
+    if (r.spd == null || r.gspd == null || r.acc == null) continue;
+    if (r.gspd < 45 || r.acc > 15) continue;
+    so += spdTrue(r.spd); sg += r.gspd; n++;
+  }
+  if (n < 300) { $('stat').textContent = `45km/h 以上の GPS が ${n} 点しかなく校正できない`; return; }
+  // 表示 = spdTrue × (丁数比 × トリム) が GPS に一致するトリム
+  const trim = sg / so / (sprkFront() / STOCK_FRONT);
+  if (!(trim > 0.8 && trim < 1.25)) { $('stat').textContent = `校正値 ${trim.toFixed(4)} が想定外。保存しない`; return; }
+  try { localStorage.setItem(TRIM_KEY, String(trim)); } catch {}
+  refresh();
+  $('stat').textContent =
+    `車速校正 ${trim.toFixed(4)}（表示係数 ${(sprkFront() / STOCK_FRONT * trim).toFixed(4)}`
+    + ` / 丁数比のみなら ${(sprkFront() / STOCK_FRONT).toFixed(4)} / GPS ${n} 点）`;
+}
+$('calsp').onclick = calibrateSpeed;
 
 $('align').onchange = () => { computeRatios(); showKDiag(); refresh(); };
 const OPTS_KEY = 'mc52_opts';
