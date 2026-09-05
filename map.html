@@ -1292,7 +1292,9 @@ const HEAD_MAX_ROWS = 60;   // 探索の上限。停車中に延々と遡らな�
 const HEAD_SMOOTH = 2;      // 仕上げの移動平均の半幅（行）
 
 function computeHeadings() {
-  const pos = rows.map(r => markerPos(r));
+  /* 位置は `posAtT` から引く。`markerPos` は補完区間で 25m 間隔の頂点へ最近傍で
+   * 丸めるので、15m の基線で方位を出すと量子化のほうが基線より粗くなる。 */
+  const pos = rows.map(r => posAtT(r.t));
   const raw = new Array(rows.length).fill(null);
   for (let i = 0; i < rows.length; i++) {
     const c = pos[i];
@@ -1515,14 +1517,23 @@ let cumS = [];     // 行ごとの、先頭からの車速積分 [m]
 const CR_ALPHA = 0.5;      // centripetal Catmull-Rom
 
 function buildPath() {
+  /* 測位が生きている行と、補完区間の点を時刻順に混ぜる。
+   *
+   * **補完点は行へスナップさせない。** 補完点は車速の積分で経路上に置かれていて
+   * 自分の時刻を持つ（`fillGaps`）。行から引くと 25m 間隔の頂点への最近傍丸めが
+   * 入るうえ、節点の時刻がその頂点へ最初に落ちた行の時刻になり、半セルぶん
+   * 早まる。持っている値をそのまま使えばどちらも起きない。 */
+  const cand = [];
+  for (const r of rows) if (r.lat != null) cand.push({t: r.t, ll: [r.lat, r.lon], est: false});
+  for (const f of fills) for (const q of f.pts) cand.push({t: q.t, ll: [q.lat, q.lon], est: true});
+  cand.sort((x, y) => x.t - y.t);
   path = [];
   let last = null;
-  for (const r of rows) {
-    const p = markerPos(r);
-    if (!p) continue;
-    if (last && p.ll[0] === last[0] && p.ll[1] === last[1]) continue;
-    path.push({t: r.t, ll: p.ll, est: p.est});
-    last = p.ll;
+  for (const c of cand) {
+    if (path.length && c.t <= path[path.length - 1].t) continue;   // 時刻は単調に
+    if (last && c.ll[0] === last[0] && c.ll[1] === last[1]) continue;
+    path.push(c);
+    last = c.ll;
   }
   // knot 間隔は節点間の距離^α。毎フレーム測り直さない
   for (let i = 0; i < path.length - 1; i++) {
@@ -1677,7 +1688,9 @@ $('file').onchange = e => {
       const base = $('stat').textContent;
       if (findFillGaps().length) {
         $('stat').textContent = base + ' / 測位途絶を補完中…';
-        fillGaps().then(() => { drawMap(); statFills(base); })
+        // **補完点は経路と方位にも入れ直す。** ここで作り直さないと、自車は
+        // トンネル前後の測位を結んだ弦を滑り、道なりに描かれた補完軌跡から外れる
+        fillGaps().then(() => { drawMap(); buildPath(); computeHeadings(); statFills(base); })
                   .catch(e => { $('stat').textContent = base + ' / 補完に失敗: ' + e.message; });
       }
     } catch (err) {
