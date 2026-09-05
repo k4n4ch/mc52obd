@@ -68,7 +68,7 @@ button:disabled{opacity:.35}
 #ver{color:var(--dim); font-size:.68rem; opacity:.65; white-space:nowrap}
 #opts .info{flex:1 1 100%; display:flex; flex-wrap:wrap; gap:.5rem; align-items:baseline;
   padding-top:.35rem; border-top:1px solid var(--line)}
-#cur{margin-left:auto; color:var(--warn); font-size:.68rem; white-space:nowrap;
+#cur{color:var(--warn); font-size:.68rem; white-space:nowrap;
   font-variant-numeric:tabular-nums}
 
 /* ── 再生バー ── */
@@ -80,9 +80,14 @@ button:disabled{opacity:.35}
 #pSpd button.on{color:var(--fg); background:#25303f; border-color:var(--accent)}
 
 /* ── 本体 ── */
+/* ペインは 3 つとも等分。2 つ出ていれば半々、1 つなら全面になる */
 #wrap{flex:1 1 auto; display:flex; min-height:0}
-#map{flex:1 1 60%; min-height:0; background:#1a1a19; position:relative; overflow:hidden}
-#mapc{position:absolute; inset:0}
+#map, #omap{flex:1 1 0; min-height:0; min-width:0; background:#1a1a19;
+  position:relative; overflow:hidden}
+#mapc, #omapc{position:absolute; inset:0}
+#map.off, #omap.off, #side.off{display:none}
+#pView{display:flex; gap:.3rem; margin-left:auto}
+#pView button.on{background:#25303f; border-color:var(--accent)}
 /* ナビ。内側を四方へ 21% 広げてから回すと、45 度でも角に隙間が出ない
    （対角は √2 = 1.414 倍。142% を確保する）。Leaflet は `.leaflet-map-pane` に
    transform を掛けて地図を動かすので、**回転はその外側のコンテナに掛ける**。 */
@@ -100,13 +105,11 @@ button:disabled{opacity:.35}
   flex-direction:column; gap:.3rem}
 #navctl button{width:1.9rem; height:1.9rem; padding:0; font-size:.85rem;
   background:rgba(20,24,31,.82); border-color:rgba(255,255,255,.25); color:#fff}
-#pNav.on{background:#25303f; border-color:var(--accent)}
-#side{flex:1 1 40%; min-width:0; overflow-y:auto; border-left:1px solid var(--line);
+#side{flex:1 1 0; min-width:0; overflow-y:auto; border-left:1px solid var(--line);
       padding:.4rem; display:flex; flex-direction:column; gap:.4rem}
 @media (max-width:900px){
   #wrap{flex-direction:column}
-  #map{flex:0 0 45vh}
-  #side{flex:1 1 auto; border-left:0; border-top:1px solid var(--line)}
+  #side{border-left:0; border-top:1px solid var(--line)}
 }
 
 /* ── チャート ── */
@@ -173,7 +176,12 @@ button:disabled{opacity:.35}
   <button id="pBack" disabled title="5 秒戻す">⏪5s</button>
   <button id="pFwd" disabled title="10 秒送る">10s⏩</button>
   <span id="pSpd"></span>
-  <button id="pNav" disabled title="進行方向を上にして自車を中心に固定する。回転数・車速・ギヤを重ねて表示">ナビ</button>
+  <!-- 表示するペインの選択。3 つのうち最後に触った 2 つを出す -->
+  <div id="pView">
+    <button id="pNav" disabled title="進行方向を上にして自車を中心に固定する。回転数・車速・ギヤを重ねて表示">ナビ</button>
+    <button id="pFit" title="経路全体を映す地図">全景</button>
+    <button id="pChart" title="車速・ギヤ・回転数などの時系列">グラフ</button>
+  </div>
   <!-- 位置と全長。倍率や送り戻しと同じ量を指しているので再生バーに置く -->
   <span id="cur"></span>
 </div>
@@ -189,6 +197,9 @@ button:disabled{opacity:.35}
       <button id="nvOut" title="縮小">−</button>
       <button id="nvOff" title="ナビモードを抜ける">✕</button>
     </div>
+  </div>
+  <div id="omap">
+    <div id="omapc"></div>
     <div id="empty">アプリが書き出した CSV を読み込むと、<br>経路と時系列を表示する</div>
   </div>
   <div id="side"></div>
@@ -197,7 +208,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260905a';
+const VERSION = 'v20260906a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -794,21 +805,69 @@ function drawMap() {
   if (!pts.length) {
     $('empty').textContent = 'このログに GPS 座標が無い。チャートのみ表示する';
     if (layer) layer.clearLayers();
+    if (olayer) olayer.clearLayers();
     return;
   }
 
-  if (!map) {
-    map = L.map('mapc', {preferCanvas:true, zoomControl:true});
-    addFitControl();
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
-    layer = L.layerGroup().addTo(map);
-    marker = L.circleMarker([0,0], {radius:6, color:'#fff', weight:2,
-      fillColor:css('--accent'), fillOpacity:1, interactive:false});
-    addLegend();
+  ensureMaps();
+  drawTrack(map, layer, marker);
+  drawTrack(omap, olayer, omarker);
+  /* 全景の範囲は毎回控えておく。抜き出しを切り替えても「全景」で戻れるように
+     するためで、視点そのものは最初の描画時だけ合わせる（切り替えのたびに
+     戻されると、拡大して見ている最中に飛ばされる）。 */
+  trackBounds = L.latLngBounds(pts.map(p => [p.lat, p.lon]));
+  if (!drawMap._fitted && omap) {
+    fitAll();
+    drawMap._fitted = true;
   }
-  layer.clearLayers();
+}
+
+/* ── 地図は 2 面ある ──────────────────────────────────
+ *
+ * ナビと全景を同時に出せるようにしたので、Leaflet のインスタンスも 2 つ持つ。
+ * レイヤは 1 つの地図にしか属せないため、経路は両方へ引き直す。点は 7 千弱で
+ * 描画は canvas なので、2 面でも負荷は問題にならない。
+ *
+ * 役割を分ける。**ナビ面は回転させるので操作系を載せない**（自前の #navctl に
+ * 置き換える）。凡例と「全体へ戻す」は全景面だけに置く。 */
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_OPT = {maxZoom:19,
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'};
+
+let omap = null, olayer = null, omarker = null;
+
+const newMarker = () => L.circleMarker([0,0], {radius:6, color:'#fff', weight:2,
+  fillColor:css('--accent'), fillOpacity:1, interactive:false});
+
+/** 表示されているペインの地図だけを作る。隠れたままの面はタイルも取りに行かない。 */
+function ensureMaps() {
+  if (typeof L === 'undefined') return;
+  /* **中心を決めてから層を足す。** 視点が未設定の地図には何も描かれない。
+   * 以前はナビ面も初回の fitAll が兼ねていたが、あれは全景面の操作になった。 */
+  const p0 = rows.find(r => r.lat != null);
+  if (!p0) return;
+  if (!map && paneOn('nav')) {
+    map = L.map('mapc', {preferCanvas:true, zoomControl:true});
+    map.setView([p0.lat, p0.lon], NAV_ZOOM_DEFAULT);
+    L.tileLayer(TILE_URL, TILE_OPT).addTo(map);
+    layer = L.layerGroup().addTo(map);
+    marker = newMarker();
+  }
+  if (!omap && paneOn('fit')) {
+    omap = L.map('omapc', {preferCanvas:true, zoomControl:true});
+    omap.setView([p0.lat, p0.lon], NAV_ZOOM_DEFAULT);   // 直後に fitAll が全体へ引く
+    L.tileLayer(TILE_URL, TILE_OPT).addTo(omap);
+    olayer = L.layerGroup().addTo(omap);
+    omarker = newMarker();
+    addFitControl(omap);
+    addLegend(omap);
+  }
+}
+
+function drawTrack(m, lg, mk) {
+  if (!m || !lg) return;
+  const pts = rows.filter(r => r.lat != null && r.lon != null);
+  lg.clearLayers();
 
   // 同じ (ギヤ, 速度クラス) が続く区間をまとめて 1 本の polyline にする。
   // 1 点ごとに線を引くと数千本になって特に端末側で重い。
@@ -844,10 +903,10 @@ function drawMap() {
     // 「濃い実線」に見えてしまい破線として読めない
     L.polyline(run.pts, {color:casing, weight:w + (run.gear ? 3 : 2), opacity: dim ? .12 : .9,
       dashArray: dash, lineCap: dash ? 'butt' : 'round',
-      lineJoin:'round', interactive:false}).addTo(layer);
+      lineJoin:'round', interactive:false}).addTo(lg);
     L.polyline(run.pts, {color: run.gear ? css(GCOL[run.gear]) : css('--gx'),
       weight:w, opacity: dim ? .18 : 1, dashArray: dash,
-      lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(layer);
+      lineCap: dash ? 'butt' : 'round', lineJoin:'round', interactive:false}).addTo(lg);
   }
 
   /* 測位を捨てた区間の補完。**色と太さは実測と同じ意味**で描く（トンネル内でも
@@ -872,44 +931,36 @@ function drawMap() {
       const dim = isolate !== null && r.gear !== isolate;
       L.polyline(r.pts, {color: r.gear ? css(GCOL[r.gear]) : css('--gx'),
         weight: r.gear ? r.w : Math.max(1.5, r.w * 0.5), opacity: dim ? .12 : .72,
-        dashArray:'5,4', lineCap:'butt', lineJoin:'round', interactive:false}).addTo(layer);
+        dashArray:'5,4', lineCap:'butt', lineJoin:'round', interactive:false}).addTo(lg);
     }
   }
-  marker.addTo(layer);
-  marker.bringToFront();   // 補完線を後から足しても隠れないようにする
-  /* 全景の範囲は毎回控えておく。抜き出しを切り替えても「全景」で戻れるように
-     するためで、視点そのものは最初の描画時だけ合わせる（切り替えのたびに
-     戻されると、拡大して見ている最中に飛ばされる）。 */
-  trackBounds = L.latLngBounds(pts.map(p => [p.lat, p.lon]));
-  if (!drawMap._fitted) {
-    fitAll();
-    drawMap._fitted = true;
-  }
+  mk.addTo(lg);
+  mk.bringToFront();   // 補完線を後から足しても隠れないようにする
 }
 
 let trackBounds = null;
 
-/** 経路全体が入るところまで引く。「全景」ボタンと初回描画で共用する。
- *  ナビ中は自車固定・回転中なので、全景を押したらナビを抜ける。 */
+/** 全景面を経路全体が入るところまで引く。初回描画と「戻す」で共用する。 */
 function fitAll() {
-  if (navOn) { setNav(false); return; }
-  if (trackBounds && trackBounds.isValid()) map.fitBounds(trackBounds, {padding:[24,24]});
+  if (omap && trackBounds && trackBounds.isValid())
+    omap.fitBounds(trackBounds, {padding:[24,24]});
 }
 
-/** 地図上に「全景」ボタンを置く。ヘッダではなく地図の操作なので地図の上に置く。 */
-function addFitControl() {
+/** 全景面に「戻す」を置く。拡大や移動をしたあと全体へ戻すための操作。
+ *  ペイン切替の「全景」とは別物なので、名前を分ける。 */
+function addFitControl(m) {
   const c = L.control({position:'topleft'});
   c.onAdd = () => {
     const d = L.DomUtil.create('div', 'leaflet-bar leaflet-control fitctl');
-    d.innerHTML = '<a href="#" role="button" title="経路全体が入るまで引く">全景</a>';
+    d.innerHTML = '<a href="#" role="button" title="経路全体が入るまで引く">戻す</a>';
     L.DomEvent.disableClickPropagation(d);
     L.DomEvent.on(d, 'click', e => { L.DomEvent.preventDefault(e); fitAll(); });
     return d;
   };
-  c.addTo(map);
+  c.addTo(m);
 }
 
-function addLegend() {
+function addLegend(m) {
   legend = L.control({position:'bottomright'});
   legend.onAdd = () => {
     const d = L.DomUtil.create('div', 'leaflet-control legend');
@@ -935,13 +986,13 @@ function addLegend() {
       el.onclick = () => {
         const g = +el.dataset.g;
         isolate = (isolate === g) ? null : g;   // 同じものを再度押すと全表示へ戻る
-        legend.remove(); addLegend();
+        legend.remove(); addLegend(omap);
         drawMap();
       };
     });
     return d;
   };
-  legend.addTo(map);
+  legend.addTo(m);
 }
 
 // ── チャート ─────────────────────────────────────────────
@@ -1303,15 +1354,15 @@ function computeHeadings() {
     for (let j = i - 1, k = 0; j >= 0 && k < HEAD_MAX_ROWS; j--, k++) {
       if (!pos[j]) continue;
       a = pos[j];
-      if (map.distance(pos[j].ll, c.ll) >= HEAD_M) break;
+      if (havM(pos[j].ll[0], pos[j].ll[1], c.ll[0], c.ll[1]) >= HEAD_M) break;
     }
     for (let j = i + 1, k = 0; j < rows.length && k < HEAD_MAX_ROWS; j++, k++) {
       if (!pos[j]) continue;
       b = pos[j];
-      if (map.distance(c.ll, pos[j].ll) >= HEAD_M) break;
+      if (havM(c.ll[0], c.ll[1], pos[j].ll[0], pos[j].ll[1]) >= HEAD_M) break;
     }
     const p0 = a || c, p1 = b || c;
-    if (p0 === p1 || map.distance(p0.ll, p1.ll) < 1) continue;   // 停車。前の値を引き継ぐ
+    if (p0 === p1 || havM(p0.ll[0], p0.ll[1], p1.ll[0], p1.ll[1]) < 1) continue;   // 停車。前の値を引き継ぐ
     raw[i] = bearing(p0.ll, p1.ll);
   }
   // 折り返さない連続値にする
@@ -1362,31 +1413,86 @@ function navApply(i, force) {
   }
 }
 
-function setNav(on) {
-  navOn = on;
-  $('map').classList.toggle('nav', on);
-  $('pNav').classList.toggle('on', on);
-  if (on) {
-    map.dragging.disable();                 // 自車固定なので動かす意味が無い
-    if (legend) map.removeControl(legend);  // 回転の外に出せないうえ場所を食う
-    map.setZoom(Math.max(map.getZoom(), NAV_ZOOM_DEFAULT));
-  } else {
-    map.dragging.enable();
-    if (legend) legend.addTo(map);
-    $('mapc').style.transform = '';
+/* ── ペイン（ナビ / 全景 / グラフ）──────────────────────
+ *
+ * 3 つのうち**最後に触った 2 つ**を出す。並びは触った順ではなく
+ * **ナビ → 全景 → グラフ の固定順**。押すたびに上下が入れ替わると、見ていた
+ * 場所が動いて追えなくなる。
+ *
+ * 押したものをもう一度押すと外れ、1 つだけになれば全面になる。0 個は作らない。
+ */
+const PANE_ORDER = ['nav', 'fit', 'chart'];
+const PANE_EL  = {nav:'map', fit:'omap', chart:'side'};
+const PANE_BTN = {nav:'pNav', fit:'pFit', chart:'pChart'};
+const PANE_KEY = 'mc52_panes';
+let shown = ['fit', 'chart'];        // 後ろほど新しく触ったもの
+
+/* CSV を読む前はナビに映すものが無いので、読み込み前だけ全景＋グラフを出す。
+ * 「CSV を読み込む」の案内は全景面に置いてあるため、ここを外すと出なくなる。 */
+const visPanes = () => rows.length ? shown : ['fit', 'chart'];
+const paneOn = k => visPanes().includes(k);
+
+function loadPanes() {
+  try {
+    const v = JSON.parse(localStorage.getItem(PANE_KEY));
+    if (Array.isArray(v) && v.length && v.length <= 2
+        && v.every(k => PANE_ORDER.includes(k))) shown = v;
+  } catch (e) { /* 壊れていれば既定のまま */ }
+}
+
+function applyPanes() {
+  const vis = visPanes();
+  for (const k of PANE_ORDER) {
+    $(PANE_EL[k]).classList.toggle('off', !vis.includes(k));
+    $(PANE_BTN[k]).classList.toggle('on', vis.includes(k));
   }
-  /* コンテナの寸法が変わった直後は、Leaflet が新しい大きさを拾い切れず
-   * ベクタ層（経路と自車）が描かれないことがある。レイアウト確定後に
-   * もう一度当てる。 */
-  map.invalidateSize({animate:false});
+  // 地図は表示されている面だけを作る。drawMap の中で必要な面が用意される
+  if (rows.length) drawMap();
+  setNav(vis.includes('nav'));
+  /* 寸法が変わったので両面とも取り直す。1 回では拾えないことがあるため、
+   * レイアウトが確定したあとにもう一度当てる（setNav と同じ理由）。 */
   const settle = () => {
-    map.invalidateSize({animate:false});
-    if (cursor >= 0) navApply(cursor, true);
-    else if (!navOn) fitAll();
+    if (map) map.invalidateSize({animate:false});
+    if (omap) omap.invalidateSize({animate:false});
+    if (navOn && cursor >= 0) navApply(cursor, true);
   };
   settle();
   requestAnimationFrame(settle);
-  setTimeout(settle, 220);   // #mapc の transition が終わったあと
+  setTimeout(settle, 80);
+  drawCharts();
+}
+
+function togglePane(k) {
+  const i = shown.indexOf(k);
+  if (i >= 0) {
+    if (shown.length === 1) return;        // 最後の 1 つは外せない
+    shown.splice(i, 1);
+  } else {
+    shown.push(k);
+    if (shown.length > 2) shown.shift();   // 一番古いものが落ちる
+  }
+  localStorage.setItem(PANE_KEY, JSON.stringify(shown));
+  applyPanes();
+}
+
+/** ナビ面はペインが出ている間つねにナビモード。表示の入切と一体で呼ぶ。 */
+function setNav(on) {
+  navOn = on;
+  $('map').classList.toggle('nav', on);
+  if (!on) { $('mapc').style.transform = ''; return; }
+  if (!map) return;
+  map.dragging.disable();                 // 自車固定なので動かす意味が無い
+  map.setZoom(Math.max(map.getZoom(), NAV_ZOOM_DEFAULT));
+  /* コンテナの寸法が変わった直後は、Leaflet が新しい大きさを拾い切れず
+   * ベクタ層（経路と自車）が描かれないことがある。レイアウト確定後に
+   * もう一度当てる。 */
+  const settle = () => {
+    map.invalidateSize({animate:false});
+    if (cursor >= 0) navApply(cursor, true);
+  };
+  settle();
+  requestAnimationFrame(settle);
+  setTimeout(settle, 220);
 }
 
 /** 回転数・車速のゲージとギヤの段数を地図に重ねる。 */
@@ -1617,8 +1723,8 @@ function setCursor(i) {
    * 破線が既に示している（一度 fillOpacity を落としたが、追いかけにくくなった）。 */
   /* ナビ中は地図上のマーカーを消す。**自車はオーバーレイの中心に固定で描く**ので、
    * 地図側にも置くと Leaflet の丸め誤差ぶんだけ二重にブレる。 */
-  if (marker && mp && !navOn) marker.setLatLng(mp.ll), marker.setStyle({opacity:1, fillOpacity:1});
-  else if (marker) { if (mp) marker.setLatLng(mp.ll); marker.setStyle({opacity:0, fillOpacity:0}); }
+  if (marker) { if (mp) marker.setLatLng(mp.ll); marker.setStyle({opacity:0, fillOpacity:0}); }
+  if (omarker && mp) omarker.setLatLng(mp.ll);
   navApply(i, false);
   drawCharts();
 }
@@ -1683,6 +1789,7 @@ $('file').onchange = e => {
       // 一度も設定していなければ自動で入れる。設定済みなら勝手に上書きしない
       if (localStorage.getItem('mc52_sf') == null) applyEstimate(true);
       refresh();
+      applyPanes();   // 選ばれている面の地図をここで用意する
       // 経路探索は外部サービスなので、地図を出してから非同期で足す。
       // 失敗しても既に描いたものは残る
       const base = $('stat').textContent;
@@ -1777,10 +1884,12 @@ function calibrateSpeed() {
 }
 $('calsp').onclick = calibrateSpeed;
 
-$('pNav').onclick = () => setNav(!navOn);
-$('nvOff').onclick = () => setNav(false);
-$('nvIn').onclick  = () => { map.zoomIn();  navApply(cursor, true); };
-$('nvOut').onclick = () => { map.zoomOut(); navApply(cursor, true); };
+$('pNav').onclick   = () => togglePane('nav');
+$('pFit').onclick   = () => togglePane('fit');
+$('pChart').onclick = () => togglePane('chart');
+$('nvOff').onclick  = () => togglePane('nav');
+$('nvIn').onclick  = () => { if (map) { map.zoomIn();  navApply(cursor, true); } };
+$('nvOut').onclick = () => { if (map) { map.zoomOut(); navApply(cursor, true); } };
 
 $('align').onchange = () => { computeRatios(); showKDiag(); refresh(); };
 const OPTS_KEY = 'mc52_opts';
@@ -1790,14 +1899,19 @@ function setOpts(open) {
   try { localStorage.setItem(OPTS_KEY, open ? '1' : '0'); } catch {}
   // 高さが変わるので地図と時系列を追随させる
   if (map) map.invalidateSize();
+  if (omap) omap.invalidateSize();
   drawCharts();
 }
 $('optBtn').onclick = () => setOpts($('opts').hidden);
 try { if (localStorage.getItem(OPTS_KEY) === '1') setOpts(true); } catch {}
 
+loadPanes();
+applyPanes();
+
 addEventListener('resize', () => {
   drawCharts();
   if (map) map.invalidateSize();
+  if (omap) omap.invalidateSize();
   if (navOn) navApply(cursor, true);
 });
 </script>
