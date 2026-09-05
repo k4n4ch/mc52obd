@@ -159,7 +159,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260901e';
+const VERSION = 'v20260905a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -196,6 +196,10 @@ const GEARS = [1,2,3,4,5,6];
  * 効かない。較正すべき自由度が存在しない。
  * 実測（5 走行 n=1554）: 新 3 本 1.0055/1.0057/1.0064（幅 0.09%）、
  * 旧 2 本は時刻ズレ未修正で 1.0036/1.0084。判定窓 4% に対し桁違いに小さい。 */
+/* `0D` は切り捨てなので真値は n+0.5。**n = 0 のときだけ補正しない。**
+ * 区間 [0,1) は真の停止を含み、停止は他から明らかに分かる。補正すると停車中の
+ * 表示が 1km/h に張り付く。 */
+const spdTrue = v => v == null ? null : (v === 0 ? 0 : v + 0.5);
 const GEAR_K = 1.0057;
 const GEAR_RPM_MIN = 1700;   // アイドル(約1500)と1速の下限(1828)の間
 
@@ -460,7 +464,7 @@ function computeRatios() {
     /* `speed_obd` は四捨五入ではなく**切り捨て**なので、真値は +0.5 して扱う
      * （2026-08-30 同定。段ごとの k のばらつきが 0.83% → 0.13% に潰れる）。
      * 丁数補正は掛けない。掛けると k ごとずれる。 */
-    const sp = r.spd == null ? null : r.spd + 0.5;
+    const sp = spdTrue(r.spd);
     r.ratio = (rp > 500 && sp >= 8.5) ? rp / sp : null;
     // 表示・線の太さの区分は丁数補正後（真の車速）
     r.spdTrue = sp == null ? null : sp * c;
@@ -639,7 +643,7 @@ function integrateDistance(t0, t1) {
   for (let i = 1; i < s.length; i++) {
     const dt = s[i].t - s[i-1].t;
     if (dt <= 0 || dt > 30) continue;
-    const v0 = (s[i-1].spd + 0.5) * speedCorr(), v1 = (s[i].spd + 0.5) * speedCorr();
+    const v0 = spdTrue(s[i-1].spd) * speedCorr(), v1 = spdTrue(s[i].spd) * speedCorr();
     d += (v0 + v1) / 2 / 3.6 * dt;
     out.push({t: s[i].t, d});
   }

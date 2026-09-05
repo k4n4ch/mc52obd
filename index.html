@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260831a';
+const VERSION = 'v20260905a';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -241,6 +241,11 @@ for (const n in GEAR_RATIO) R[n] = PRIMARY * GEAR_RATIO[n] * SECONDARY / (TIRE_C
  * 空気圧も摩耗も効かない。較正すべき自由度が存在しないので定数にする。
  * 実測 5 走行 n=1554 で、新 3 本は 1.0055/1.0057/1.0064（幅 0.09%）。 */
 const SPD_HALF = 0.5;
+/* `0D` は切り捨てなので真値は区間 [n, n+1) の中央、すなわち n+0.5 とみなす。
+ * **ただし n = 0 のときだけは補正しない。** 区間 [0,1) は真の停止（ちょうど 0）を
+ * 含み、停止していることは他から明らかに分かる。ここで +0.5 すると、停車中に
+ * 表示が 1km/h に張り付く（実際にそうなっていた）。 */
+const spdTrue = v => v == null ? null : (v === 0 ? 0 : v + SPD_HALF);
 const gearK = 1.0057;
 
 /* ── 表示車速の補正 ────────────────────────────────────────
@@ -756,7 +761,7 @@ const RPM_MAX = 10500;   // CB250R のレッドゾーン手前まで。バーの
 function render() {
   setTxt('rpmv', V.rpm, 0);
   // 主表示は補正後（真の車速）。生値は副表示に併記する
-  setTxt('spdv', V.spd === null ? null : (V.spd + SPD_HALF) * speedCorr(), 0);
+  setTxt('spdv', V.spd === null ? null : spdTrue(V.spd) * speedCorr(), 0);
   setTxt('thrv', V.thr, 0);
   setTxt('loadv', V.load, 0);
   setTxt('ectv', V.ect, 0);
