@@ -1297,14 +1297,18 @@ function navHeading(i) {
 
 function navApply(i, force) {
   if (!navOn || i < 0 || !rows[i]) return;
-  const now = performance.now();
-  if (!force && now - navLastDraw < 1000 / NAV_FPS) return;
-  navLastDraw = now;
+  /* **地図の追従は間引かない。** 自車は画面中心に固定して描くので、地図だけを
+   * 間引くと自車が進行方向へズレてから戻る動きになる（実際そうなっていた）。
+   * 重いのは文字と円弧を描き直すゲージのほうなので、そちらだけ間引く。 */
   const mp = posAtT(viewT != null ? viewT : rows[i].t) || markerPos(rows[i]);
   if (mp) map.setView(mp.ll, map.getZoom(), {animate:false});
   navHead = navHeading(i);
   $('mapc').style.transform = `rotate(${-navHead}deg)`;
-  drawNavGauge(rows[i]);
+  const now = performance.now();
+  if (force || now - navLastDraw >= 1000 / NAV_FPS) {
+    navLastDraw = now;
+    drawNavGauge(rows[i]);
+  }
 }
 
 function setNav(on) {
@@ -1365,6 +1369,15 @@ function drawNavGauge(r) {
     g.font = `${R * 0.24}px system-ui,sans-serif`; g.fillStyle = 'rgba(255,255,255,.7)';
     g.fillText(unit, cx, cy + R * 0.46);
   };
+  /* 自車は**画面のちょうど中心**。地図のほうが動く。 */
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,.55)'; g.shadowBlur = 6;
+  g.fillStyle = '#fff';
+  g.beginPath(); g.arc(w / 2, h / 2, 8, 0, Math.PI * 2); g.fill();
+  g.fillStyle = css('--accent') || '#4a9eff';
+  g.beginPath(); g.arc(w / 2, h / 2, 5.5, 0, Math.PI * 2); g.fill();
+  g.restore();
+
   const pad = R + 20;
   g.save();
   g.shadowColor = 'rgba(0,0,0,.75)'; g.shadowBlur = 6;
@@ -1446,8 +1459,10 @@ function setCursor(i) {
   /* 補完区間でも見た目は変えない。**マーカーの仕事は「いまどこか」を示すこと**で、
    * 視認性を落とすのは役割と衝突する。位置が推定であることは、その場所に引かれた
    * 破線が既に示している（一度 fillOpacity を落としたが、追いかけにくくなった）。 */
-  if (marker && mp) marker.setLatLng(mp.ll), marker.setStyle({opacity:1, fillOpacity:1});
-  else if (marker) marker.setStyle({opacity:0, fillOpacity:0});
+  /* ナビ中は地図上のマーカーを消す。**自車はオーバーレイの中心に固定で描く**ので、
+   * 地図側にも置くと Leaflet の丸め誤差ぶんだけ二重にブレる。 */
+  if (marker && mp && !navOn) marker.setLatLng(mp.ll), marker.setStyle({opacity:1, fillOpacity:1});
+  else if (marker) { if (mp) marker.setLatLng(mp.ll); marker.setStyle({opacity:0, fillOpacity:0}); }
   navApply(i, false);
   drawCharts();
 }
