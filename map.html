@@ -1129,6 +1129,7 @@ function bindCursor(cv) {
       const d = Math.abs(rows[i].t - t);
       if (d < bd) { bd = d; bi = i; }
     }
+    viewT = t;          // なぞった位置そのもの。行にスナップさせない
     setCursor(bi);
     /* **再生位置は確定操作のときだけ更新する。** setCursor の中で更新すると、
      * 再生ループが進めた playT を行の時刻へスナップして戻してしまう。行間隔が
@@ -1199,6 +1200,7 @@ function setPlay(p) {
 function seekTo(t) {
   const [t0, t1] = tSpan();
   playT = Math.max(t0, Math.min(t1, t));
+  viewT = playT;
   setCursor(idxAtT(playT));
 }
 
@@ -1208,6 +1210,7 @@ function playTick(ts) {
     if (lastRAF) playT += (ts - lastRAF) / 1000 * playSpeed;
     lastRAF = ts;
     if (playT >= t1) { playT = t1; setPlay(false); }
+    viewT = playT;
     setCursor(idxAtT(playT));
   }
   requestAnimationFrame(playTick);
@@ -1297,7 +1300,7 @@ function navApply(i, force) {
   const now = performance.now();
   if (!force && now - navLastDraw < 1000 / NAV_FPS) return;
   navLastDraw = now;
-  const mp = markerPos(rows[i]);
+  const mp = posAtT(viewT != null ? viewT : rows[i].t) || markerPos(rows[i]);
   if (mp) map.setView(mp.ll, map.getZoom(), {animate:false});
   navHead = navHeading(i);
   $('mapc').style.transform = `rotate(${-navHead}deg)`;
@@ -1367,13 +1370,64 @@ function drawNavGauge(r) {
   g.shadowColor = 'rgba(0,0,0,.75)'; g.shadowBlur = 6;
   arc(pad, h - pad, r.rpm, 10000, '回転数', 'rpm');
   arc(w - pad, h - pad, r.spdTrue, 140, '車速', 'km/h');
-  // ギヤは数字だけ。上端中央に大きく置く
-  g.fillStyle = '#fff'; g.textAlign = 'center';
-  g.font = `700 ${R * 1.05}px ui-monospace,monospace`;
-  g.fillText(r.gear ? String(r.gear) : (r.gstate === 'slow' ? '–' : '?'), w / 2, R * 1.05 + 8);
-  g.font = `${R * 0.26}px system-ui,sans-serif`; g.fillStyle = 'rgba(255,255,255,.7)';
-  g.fillText('GEAR', w / 2, R * 1.05 + 8 + R * 0.34);
   g.restore();
+
+  /* ギヤは左上。コントロールを右上へ逃がしてあるので空いている。
+   * 地図は明暗どちらにもなるので、暗い角丸を敷いたうえで文字にも縁を付ける。 */
+  const gs = r.gear ? String(r.gear) : (r.gstate === 'slow' ? '–' : '?');
+  // 見出しと数字が触れないよう縦を広めに取る
+  const gr = R * 1.15, bw = gr * 1.55, bh = gr * 1.85;
+  const bx = 10 + bw / 2, by = 10 + bh / 2;
+  g.save();
+  g.fillStyle = 'rgba(16,20,26,.62)';
+  g.beginPath(); g.roundRect(bx - bw / 2, by - bh / 2, bw, bh, gr * 0.28); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 1.5; g.stroke();
+  g.textAlign = 'center';
+  g.font = `700 ${gr}px ui-monospace,monospace`;
+  g.lineWidth = Math.max(3, gr * 0.14); g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(0,0,0,.85)';
+  g.strokeText(gs, bx, by + gr * 0.46);          // 縁取りしてから塗る
+  g.fillStyle = '#fff';
+  g.fillText(gs, bx, by + gr * 0.46);
+  g.font = `600 ${gr * 0.26}px system-ui,sans-serif`;
+  g.lineWidth = Math.max(2, gr * 0.09);
+  g.strokeText('GEAR', bx, by - bh / 2 + gr * 0.30);
+  g.fillStyle = 'rgba(255,255,255,.82)';
+  g.fillText('GEAR', bx, by - bh / 2 + gr * 0.30);
+  g.restore();
+}
+
+/* 表示の基準時刻。再生中は `playT`、それ以外は選んだ行の時刻。
+ * **行にスナップさせず連続時刻で持つ**ことで、自車を計測点の間に置ける。 */
+let viewT = null;
+
+/**
+ * 時刻 `t` の自車位置を、前後の計測点から内挿して返す。
+ *
+ * 計測は約 1.3Hz しかないので、行の位置にスナップさせると自車が 10〜25m
+ * 刻みで飛ぶ。ナビモードでは特に目立つ。
+ *
+ * **区間内の配分は車速で行う。** 単純な時間比だと、欠測やトンネル補完で
+ * 間隔が空いたところで実際の移動と合わない。区間の速度が線形に変わると
+ * みなすと、経過 τ までに進む距離は `v0·τ + (v1-v0)·τ²/(2Δ)` なので、
+ * これを区間全体の距離で割った比を使う。
+ */
+function posAtT(t) {
+  if (!rows.length) return null;
+  let lo = 0, hi = rows.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (rows[m].t <= t) lo = m; else hi = m; }
+  const a = rows[lo], b = rows[hi];
+  const pa = markerPos(a), pb = markerPos(b);
+  if (!pa) return pb || null;
+  if (!pb || b.t <= a.t) return pa;
+  const d = b.t - a.t, tau = Math.max(0, Math.min(d, t - a.t));
+  const v0 = a.spdTrue ?? 0, v1 = b.spdTrue ?? v0;
+  const total = (v0 + v1) / 2 * d;
+  const f = total > 0 ? (v0 * tau + (v1 - v0) * tau * tau / (2 * d)) / total : tau / d;
+  const k = Math.max(0, Math.min(1, f));
+  return {ll: [pa.ll[0] + (pb.ll[0] - pa.ll[0]) * k,
+                pa.ll[1] + (pb.ll[1] - pa.ll[1]) * k],
+          est: pa.est || pb.est};
 }
 
 function setCursor(i) {
@@ -1387,7 +1441,8 @@ function setCursor(i) {
     const v = r ? r[s.key] : null;
     el.textContent = v == null ? '--' : (+v).toFixed(s.fix) + (s.unit ? ' ' + s.unit : '');
   }
-  const mp = r ? markerPos(r) : null;
+  // 位置だけは行にスナップさせず、連続時刻から内挿する
+  const mp = r ? (posAtT(viewT != null ? viewT : r.t) || markerPos(r)) : null;
   /* 補完区間でも見た目は変えない。**マーカーの仕事は「いまどこか」を示すこと**で、
    * 視認性を落とすのは役割と衝突する。位置が推定であることは、その場所に引かれた
    * 破線が既に示している（一度 fillOpacity を落としたが、追いかけにくくなった）。 */
