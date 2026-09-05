@@ -86,7 +86,8 @@ button:disabled{opacity:.35}
 /* ナビ。内側を四方へ 21% 広げてから回すと、45 度でも角に隙間が出ない
    （対角は √2 = 1.414 倍。142% を確保する）。Leaflet は `.leaflet-map-pane` に
    transform を掛けて地図を動かすので、**回転はその外側のコンテナに掛ける**。 */
-#map.nav #mapc{inset:-21%; transition:transform .18s linear}
+/* 毎フレーム内挿した方位を当てるので、CSS 側で更に補間すると二重になる */
+#map.nav #mapc{inset:-21%}
 #map.nav .leaflet-control-container{display:none}   /* 一緒に回るので自前に置き換える */
 #navg, #navctl{display:none}
 /* canvas は置換要素なので `inset:0` では伸びない（width:auto のとき固有幅
@@ -1259,11 +1260,9 @@ function markerPos(r) {
  * #map の overflow:hidden で切る。この広げた分だけ Leaflet のコントロールも
  * 画面外へ出るので、ナビ中は隠して自前のボタンに置き換える。
  */
-let navOn = false, navHead = 0, navRaw = null, navLastDraw = 0;
+let navOn = false, navHead = 0, navLastDraw = 0;
 const NAV_ZOOM_DEFAULT = 17;
-const NAV_MIN_KMH = 10;     // これ未満は方位が暴れるので凍結する
-const NAV_MIN_M = 8;        // 方位を取り直す最小移動量
-const NAV_FPS = 12;         // 地図の更新頻度。30 倍速で毎フレーム動かすと重い
+const NAV_FPS = 12;         // ゲージの描き直しだけ間引く。地図の追従は間引かない
 
 function bearing(a, b) {
   const r = Math.PI / 180;
@@ -1275,24 +1274,74 @@ function bearing(a, b) {
 
 /** 現在位置から少し先（または手前）を見て進行方位を出す。
  *  移動量が足りない・低速のときは前回の方位を保つ。 */
-function navHeading(i) {
-  const cur = rows[i] && markerPos(rows[i]);
-  if (!cur) return navHead;
-  const sp = rows[i].spdTrue;
-  if (sp != null && sp < NAV_MIN_KMH) return navHead;   // 停車・徐行では凍結
-  for (let j = i + 1; j < rows.length && j < i + 30; j++) {
-    const p = markerPos(rows[j]);
-    if (!p) continue;
-    if (map.distance(cur.ll, p.ll) < NAV_MIN_M) continue;
-    const b = bearing(cur.ll, p.ll);
-    // 急な振れを鈍らせる。角度の折り返しを跨いでも短いほうへ回す
-    /* **剰余を取らずに積む。** 0/360 をまたぐたびに値が飛ぶと、CSS の遷移が
-     * 逆回りに 350 度回してしまう。差分だけ ±180 に畳んで足し込む。 */
-    let d = ((b - navHead) % 360 + 540) % 360 - 180;
-    navRaw = b;
-    return navHead + d * 0.35;
+/**
+ * 行ごとの進行方位を先に求めて `r.head` に入れる。読み込みのたびに 1 回だけ。
+ *
+ * **描画時に 2 点方位を取ると方位が離散的に変わる。** 起点が「最も近い行」で
+ * 決まるためサンプル間隔の中点で飛び、終点も別の行へ切り替わるので、生の方位が
+ * 階段状になる。毎フレームの指数平滑では階段を追うだけで、細かい揺れが残る。
+ *
+ * そこで行ごとに**前後 HEAD_M ずつの点を結んだ方位**を求めておく。基線が実質
+ * 2·HEAD_M になるので GPS の位置誤差の寄与も小さくなる（8m 基線だと ±3m の
+ * 誤差が ±20° に化けるが、30m なら ±6° 程度）。
+ *
+ * 値は**折り返さない連続値**として積む。そうすると描画時は素直に内挿できる。
+ */
+const HEAD_M = 15;          // 前後それぞれこの距離ぶんを見る
+const HEAD_MAX_ROWS = 60;   // 探索の上限。停車中に延々と遡らない
+const HEAD_SMOOTH = 2;      // 仕上げの移動平均の半幅（行）
+
+function computeHeadings() {
+  const pos = rows.map(r => markerPos(r));
+  const raw = new Array(rows.length).fill(null);
+  for (let i = 0; i < rows.length; i++) {
+    const c = pos[i];
+    if (!c) continue;
+    let a = null, b = null;
+    for (let j = i - 1, k = 0; j >= 0 && k < HEAD_MAX_ROWS; j--, k++) {
+      if (!pos[j]) continue;
+      a = pos[j];
+      if (map.distance(pos[j].ll, c.ll) >= HEAD_M) break;
+    }
+    for (let j = i + 1, k = 0; j < rows.length && k < HEAD_MAX_ROWS; j++, k++) {
+      if (!pos[j]) continue;
+      b = pos[j];
+      if (map.distance(c.ll, pos[j].ll) >= HEAD_M) break;
+    }
+    const p0 = a || c, p1 = b || c;
+    if (p0 === p1 || map.distance(p0.ll, p1.ll) < 1) continue;   // 停車。前の値を引き継ぐ
+    raw[i] = bearing(p0.ll, p1.ll);
   }
-  return navHead;
+  // 折り返さない連続値にする
+  const un = new Array(rows.length).fill(null);
+  let prev = null;
+  for (let i = 0; i < rows.length; i++) {
+    if (raw[i] == null) { un[i] = prev; continue; }
+    un[i] = prev == null ? raw[i]
+          : prev + (((raw[i] - prev) % 360 + 540) % 360 - 180);
+    prev = un[i];
+  }
+  for (let i = rows.length - 1; i >= 0 && un[i] == null; i--) un[i] = prev;
+  for (let i = 0; i < rows.length && un[i] == null; i++) un[i] = un.find(v => v != null) ?? 0;
+  // 残ったギザギザを移動平均で均す
+  for (let i = 0; i < rows.length; i++) {
+    let s = 0, n = 0;
+    for (let j = i - HEAD_SMOOTH; j <= i + HEAD_SMOOTH; j++) {
+      if (j < 0 || j >= rows.length || un[j] == null) continue;
+      s += un[j]; n++;
+    }
+    rows[i].head = n ? s / n : (un[i] ?? 0);
+  }
+}
+
+/** 時刻 `t` の方位。連続値なので前後の行を素直に内挿できる。 */
+function headAtT(t) {
+  const br = bracketAtT(t);
+  if (!br) return navHead;
+  const a = rows[br.lo].head, b = rows[br.hi].head;
+  if (a == null) return b ?? navHead;
+  if (b == null) return a;
+  return a + (b - a) * br.k;
 }
 
 function navApply(i, force) {
@@ -1302,7 +1351,7 @@ function navApply(i, force) {
    * 重いのは文字と円弧を描き直すゲージのほうなので、そちらだけ間引く。 */
   const mp = posAtT(viewT != null ? viewT : rows[i].t) || markerPos(rows[i]);
   if (mp) map.setView(mp.ll, map.getZoom(), {animate:false});
-  navHead = navHeading(i);
+  navHead = headAtT(viewT != null ? viewT : rows[i].t);
   $('mapc').style.transform = `rotate(${-navHead}deg)`;
   const now = performance.now();
   if (force || now - navLastDraw >= 1000 / NAV_FPS) {
@@ -1425,19 +1474,28 @@ let viewT = null;
  * みなすと、経過 τ までに進む距離は `v0·τ + (v1-v0)·τ²/(2Δ)` なので、
  * これを区間全体の距離で割った比を使う。
  */
-function posAtT(t) {
+/** 時刻 `t` を挟む 2 行と、その間の比率を返す。位置と方位で共用する。 */
+function bracketAtT(t) {
   if (!rows.length) return null;
   let lo = 0, hi = rows.length - 1;
   while (hi - lo > 1) { const m = (lo + hi) >> 1; if (rows[m].t <= t) lo = m; else hi = m; }
   const a = rows[lo], b = rows[hi];
-  const pa = markerPos(a), pb = markerPos(b);
-  if (!pa) return pb || null;
-  if (!pb || b.t <= a.t) return pa;
-  const d = b.t - a.t, tau = Math.max(0, Math.min(d, t - a.t));
+  const d = b.t - a.t;
+  if (d <= 0) return {lo, hi, k: 0};
+  const tau = Math.max(0, Math.min(d, t - a.t));
   const v0 = a.spdTrue ?? 0, v1 = b.spdTrue ?? v0;
   const total = (v0 + v1) / 2 * d;
   const f = total > 0 ? (v0 * tau + (v1 - v0) * tau * tau / (2 * d)) / total : tau / d;
-  const k = Math.max(0, Math.min(1, f));
+  return {lo, hi, k: Math.max(0, Math.min(1, f))};
+}
+
+function posAtT(t) {
+  const br = bracketAtT(t);
+  if (!br) return null;
+  const pa = markerPos(rows[br.lo]), pb = markerPos(rows[br.hi]);
+  if (!pa) return pb || null;
+  if (!pb) return pa;
+  const k = br.k;
   return {ll: [pa.ll[0] + (pb.ll[0] - pa.ll[0]) * k,
                 pa.ll[1] + (pb.ll[1] - pa.ll[1]) * k],
           est: pa.est || pb.est};
@@ -1477,7 +1535,7 @@ function refresh() {
   if (isFinite(tol) && tol > 0) localStorage.setItem('mc52_tol', String(tol));
   assignGears(GEAR_K, tol);
   // 地図側の失敗でチャートを巻き込まない
-  try { drawMap(); } catch (e) { console.warn('map:', e); }
+  try { drawMap(); computeHeadings(); } catch (e) { console.warn('map:', e); }
   drawCharts();
   const n = rows.length;
   const gps = rows.filter(r => r.lat != null).length;
