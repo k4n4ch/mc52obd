@@ -232,7 +232,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906e';
+const VERSION = 'v20260906f';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1222,20 +1222,48 @@ function buildChartBg(s, w, h, dpr) {
    * 下端の 1 枚だけに置くとスクロールで見えなくなり、区間を時刻で指す用が
    * 足せない（ログの何分何秒を見ているかが分からない）。 */
   {
-    const STEPS = [10, 30, 60, 120, 300, 600, 900, 1800];
-    const step = STEPS.find(v => AW / v <= 9) || 3600;
+    const STEPS = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600];
+    const step = STEPS.find(v => AW / v <= 9) || 43200;
     g.strokeStyle = css('--line'); g.lineWidth = 1;
     g.fillStyle = css('--mute'); g.font = '9px -apple-system,sans-serif';
     g.textAlign = 'center';
-    /* 刻みは**軸の上で等間隔**に置き、札は**その位置の実経過時間**を出す。
-     * 潰した区間があると札は等間隔にならないが、札が嘘になるよりよい。
-     * 刻みを経過時間で置くと、潰した空白の中に目盛りが落ちる。 */
-    for (let e = step; e <= AW; e += step) {
-      const x = 30 + (w - 36) * (e / AW);
+    const tick = (x, lab) => {
       g.globalAlpha = .5;
       g.beginPath(); g.moveTo(x, 2); g.lineTo(x, h - 11); g.stroke();
       g.globalAlpha = 1;
-      g.fillText(mmss(aToT(A0 + e) - t0), x, h - 2);
+      g.fillText(lab, x, h - 2);
+    };
+    /* 札は**絶対時刻**（ローカル）。日をまたいで繋ぐと経過時間が 9,032 分の
+     * ような数字になり、軸がどの時刻を指しているか分からなくなる。
+     *
+     * 刻みは**丸い時刻に合わせる**。等間隔に置いて絶対時刻を書くと `9:59` の
+     * ような端数の札になり読みにくい（経過時間を採っていた元の理由がこれ）。
+     * 区間ごとに丸めれば、潰した空白の中へ目盛りが落ちることもない。
+     *
+     * `iso_time` を持たない形式は絶対時刻が無いので、経過時間へ落とす。 */
+    const segs = axisMap.length ? axisMap : [{t0: rows[0].t, t1: t1}];
+    const org = isFinite(rows[0].ms) ? rows[0].ms - rows[0].t * 1000 : null;
+    if (org == null) {
+      for (let e = step; e <= AW; e += step)
+        tick(30 + (w - 36) * (e / AW), mmss(aToT(A0 + e) - t0));
+    } else {
+      let lastDay = null;
+      for (const seg of segs) {
+        const s0 = org + seg.t0 * 1000, s1 = org + seg.t1 * 1000;
+        // 丸めはローカル時刻で行う。UTC で丸めると時差の分だけ端数が出る
+        const tz = new Date(s0).getTimezoneOffset() * 60000;
+        const ms = step * 1000;
+        for (let m = Math.ceil((s0 - tz) / ms) * ms + tz; m <= s1; m += ms) {
+          const d = new Date(m);
+          const hm = String(d.getHours()).padStart(2, '0') + ':'
+                   + String(d.getMinutes()).padStart(2, '0');
+          // 日付は日が変わったときだけ添える。毎回書くと札が重なる
+          const lab = d.getDate() === lastDay ? hm
+                    : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+          lastDay = d.getDate();
+          tick(X((m - org) / 1000), lab);
+        }
+      }
     }
   }
 
