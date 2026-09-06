@@ -94,13 +94,15 @@ button:disabled{opacity:.35}
 #seek:disabled{cursor:default; opacity:.4}
 #seek::-webkit-slider-runnable-track{height:.3rem; border-radius:.15rem;
   background:linear-gradient(to right, var(--accent) var(--p,0%), var(--line) var(--p,0%))}
-#seek::-webkit-slider-thumb{-webkit-appearance:none; appearance:none; margin-top:-.26rem;
-  width:.82rem; height:.82rem; border-radius:50%;
+/* 幅は px で固定する。塗りの位置を JS が同じ値で計算するので、rem 依存だと
+   ルートの字送りが変わったときに食い違う */
+#seek::-webkit-slider-thumb{-webkit-appearance:none; appearance:none; margin-top:-5.5px;
+  box-sizing:border-box; width:14px; height:14px; border-radius:50%;
   background:var(--fg); border:2px solid var(--accent)}
 #seek::-moz-range-track{height:.3rem; border-radius:.15rem; background:var(--line)}
 #seek::-moz-range-progress{height:.3rem; border-radius:.15rem; background:var(--accent)}
-#seek::-moz-range-thumb{width:.82rem; height:.82rem; border:2px solid var(--accent);
-  border-radius:50%; background:var(--fg)}
+#seek::-moz-range-thumb{box-sizing:border-box; width:14px; height:14px;
+  border:2px solid var(--accent); border-radius:50%; background:var(--fg)}
 #seek:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 #pView button.on{background:#25303f; border-color:var(--accent)}
 /* ナビ。内側を四方へ 21% 広げてから回すと、45 度でも角に隙間が出ない
@@ -232,7 +234,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906h';
+const VERSION = 'v20260906i';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1484,7 +1486,13 @@ function syncSeek(t) {
   const a = tToA(t);
   // つまみを掴んでいる間は値を書き戻さない（掴んだ位置と競合する）
   if (!seeking) s.value = Math.round((a - a0) * 10);
-  s.style.setProperty('--p', ((a - a0) / (a1 - a0) * 100).toFixed(2) + '%');
+  /* 塗りは**つまみの実位置に合わせる**。原生のスライダはつまみが枠から出ないよう
+   * 可動域が幅からつまみ 1 個ぶん狭く、全幅で塗ると両端で 6px ずれる（中央で 0、
+   * 符号が反転する）。逆につまみを全幅へ動かすと、押した位置と点がずれる ——
+   * クリック位置から値を出すのも同じ内側の写像だから。 */
+  const W = s.clientWidth || 1, TH = 14;   // つまみの直径。CSS と揃える
+  const f = (a - a0) / (a1 - a0);
+  s.style.setProperty('--p', (((W - TH) * f + TH / 2) / W * 100).toFixed(2) + '%');
 }
 
 $('seek').addEventListener('input',
