@@ -232,7 +232,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906f';
+const VERSION = 'v20260906g';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -2107,12 +2107,29 @@ function refresh() {
   const dur = n ? (rows[n-1].t - rows[0].t) : 0;
   const al = rows.length && rows[0].hasSkew ? 'skew列' : '周期推定';
   const ns = rows.sessions ? rows.sessions.length : 1;
+  const km = totalDistM() / 1000;
   $('stat').textContent = (ns > 1 ? `${ns} 本を連結 / ` : '')
     + `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
+    + `走行 ${km.toFixed(1)}km / `
     + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`
     + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)')
     + (speedCorr() !== 1 ? ` / 車速 ×${speedCorr().toFixed(4)}` : '')
     + (rows.badFixes ? ` / 精度不良で除外 ${rows.badFixes} 点` : '');
+}
+
+/* 総走行距離。**車速の積分で出す。** GPS はトンネルで落ちるので経路長からは
+ * 出せない。`cumS` と同じ規則（補正後の車速、30 秒を超える間隔は捨てる）で計算
+ * するが、地図の失敗に巻き込まれないよう独立して持つ。 */
+function totalDistM() {
+  let d = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const dt = rows[i].t - rows[i - 1].t;
+    if (!(dt > 0 && dt <= 30)) continue;
+    const v0 = rows[i - 1].spdTrue, v1 = rows[i].spdTrue;
+    if (v0 == null || v1 == null) continue;
+    d += (v0 + v1) / 2 / 3.6 * dt;
+  }
+  return d;
 }
 
 /** 補完の結果を状態行へ足す。落ちた区間は理由ごと出す（黙って消さない）。 */
