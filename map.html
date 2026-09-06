@@ -234,7 +234,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906i';
+const VERSION = 'v20260906j';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -2193,7 +2193,7 @@ $('file').onchange = async e => {
       $('calsp').disabled = false;
       $('pNav').disabled = false;
       for (const id of ['pPlay', 'pBack', 'pFwd']) $(id).disabled = false;
-      playT = rows[0].t; setPlay(false); initSeek();
+      playT = rows[0].t; setPlay(false);
       showKDiag();
       // **丁数の自動推定より先にキャンバスを作る。** 推定は onSprk 経由で
       // refresh を呼ぶので、後に置くと描画対象が無いまま走る
@@ -2201,6 +2201,10 @@ $('file').onchange = async e => {
       // 一度も設定していなければ自動で入れる。設定済みなら勝手に上書きしない
       if (localStorage.getItem('mc52_sf') == null) applyEstimate(true);
       refresh();
+      /* **`initSeek` は `refresh` の後。** つまみの上限は軸の長さで決まるが、
+       * 軸は `refresh` の中の `buildAxis` で組まれる。先に呼ぶと空白を詰める前の
+       * 長さで上限が決まり、詰めた後の値を書くのでつまみだけが手前で止まる。 */
+      initSeek();
       applyPanes();   // 選ばれている面の地図をここで用意する
       // 経路探索は外部サービスなので、地図を出してから非同期で足す。
       // 失敗しても既に描いたものは残る
