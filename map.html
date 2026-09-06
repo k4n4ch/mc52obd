@@ -181,6 +181,7 @@ button:disabled{opacity:.35}
     <select id="sf"></select></label>
   <button id="estsp" disabled title="GPS 速度との一致から前後の丁数を推定する。速度比だけでは一意に決まらないため候補も出す">丁数推定</button>
   <button id="calsp" disabled title="表示車速が GPS と一致するよう校正トリムを求める。丁数比だけでは実測と 1% 弱ずれるため（ECU の想定円周と実際の転がり円周の差）。走行画面と共有する">車速校正</button>
+  <label title="複数のログを繋いだとき、記録の無いセッション間の空白を固定幅へ潰す。走行中の停車や欠測は実時間のまま残す"><input type="checkbox" id="gsq" checked> 空白を詰める</label>
   <label title="ナビに重ねる回転数・車速のゲージの見た目">ゲージ
     <select id="gsty"></select></label>
   <!-- 行数・確定率・補完の結果は読み込み時に一度見れば足りる診断で、走行を
@@ -231,7 +232,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906d';
+const VERSION = 'v20260906e';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -631,6 +632,66 @@ function stopSpans(minSec) {
   }
   if (s !== null && rows[rows.length-1].t - s >= minSec) out.push([s, rows[rows.length-1].t]);
   return out;
+}
+
+/* ── 時間軸の空白を詰める ──────────────────────────────
+ *
+ * 日をまたいで連結すると軸の大半が駐車で埋まる（実測で 2 日ぶんを繋ぐと
+ * 軸 151.6h に対し記録は 6.9h、95% が空白）。そこで空白を固定長へ潰す。
+ *
+ * **潰すのはセッションの切れ目だけ。** そこは記録そのものが存在しない区間で、
+ * 読むものが無い。走行中の停車や欠測は実時間のまま残す —— 記録は続いており、
+ * 止まっていたことが情報になる。
+ *
+ * データのある区間は全部同じ縮尺を共有するので、**傾きはどこでも比較可能**。
+ * 非線形になるのは記録が無い場所だけ。単一ファイルでは切れ目が無いので何も
+ * 起きない。 */
+const GAP_MIN = 600;    // [s] セッション間がこれ以上空いていたら潰す
+const GAP_EQ = 45;      // [s] 潰した後の見かけの長さ
+let axisMap = [];       // {t0,t1,a0} データ区間と、その軸上の起点
+
+function buildAxis() {
+  axisMap = [];
+  if (!rows.length) return;
+  let s = rows[0].t, a = 0;
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i].sessTop) continue;                    // 切れ目以外は触らない
+    const d = rows[i].t - rows[i - 1].t;
+    if (d < GAP_MIN) continue;
+    axisMap.push({t0: s, t1: rows[i - 1].t, a0: a, gap: d});
+    a += rows[i - 1].t - s + GAP_EQ;
+    s = rows[i].t;
+  }
+  axisMap.push({t0: s, t1: rows[rows.length - 1].t, a0: a, gap: 0});
+}
+
+const squashOn = () => axisMap.length > 1 && $('gsq').checked;
+
+/** 時刻 → 軸座標。潰していなければ恒等。 */
+function tToA(t) {
+  if (!squashOn()) return t;
+  for (const g of axisMap) {
+    if (t < g.t0) return g.a0;                         // 空白の中は区間の頭へ寄せる
+    if (t <= g.t1) return g.a0 + (t - g.t0);
+  }
+  const L = axisMap[axisMap.length - 1];
+  return L.a0 + (L.t1 - L.t0);
+}
+
+/** 軸座標 → 時刻。 */
+function aToT(a) {
+  if (!squashOn()) return a;
+  for (const g of axisMap) {
+    if (a <= g.a0 + (g.t1 - g.t0)) return g.t0 + Math.max(0, a - g.a0);
+  }
+  return axisMap[axisMap.length - 1].t1;
+}
+
+/** 軸の両端。潰していなければ時刻そのもの。 */
+function axisSpan() {
+  if (!squashOn()) return tSpan();
+  const L = axisMap[axisMap.length - 1];
+  return [0, L.a0 + (L.t1 - L.t0)];
 }
 
 /** 斜線ハッチのパターン。停車帯の塗りに使う（ベタ塗りだとデータを隠す） */
@@ -1111,7 +1172,8 @@ function buildChartBg(s, w, h, dpr) {
   const pad = fixed ? 0 : (hi - lo) * 0.08;
   lo -= pad; hi += pad;
   const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
-  const X = t => 30 + (w - 36) * ((t - t0) / (t1 - t0 || 1));
+  const [A0, A1] = axisSpan(), AW = (A1 - A0) || 1;
+  const X = t => 30 + (w - 36) * ((tToA(t) - A0) / AW);
   const Y = v => h - 12 - (h - 20) * ((v - lo) / (hi - lo));
 
   const cv = document.createElement('canvas');
@@ -1132,12 +1194,26 @@ function buildChartBg(s, w, h, dpr) {
    * （軸を非線形に潰すと、傾きから加速度を読む見方が壊れる）。 */
   if (rows.sessions && rows.sessions.length > 1) {
     g.save();
-    g.strokeStyle = css('--warn') || '#ffb020'; g.lineWidth = 1;
-    g.setLineDash([3, 3]);
+    const warn = css('--warn') || '#ffb020';
     for (const r of rows) {
       if (!r.sessTop) continue;
       const x = X(r.t);
-      g.beginPath(); g.moveTo(x, 2); g.lineTo(x, h - 6); g.stroke();
+      g.strokeStyle = warn; g.lineWidth = 1; g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(x, 2); g.lineTo(x, h - 11); g.stroke();
+    }
+    // 潰した空白には長さを書く。詰めたことを黙って隠さない
+    if (squashOn()) {
+      g.setLineDash([]); g.textAlign = 'center';
+      g.font = '9px -apple-system,sans-serif';
+      for (const seg of axisMap) {
+        if (!seg.gap) continue;
+        const x = 30 + (w - 36) * ((seg.a0 + (seg.t1 - seg.t0) + GAP_EQ / 2 - A0) / AW);
+        g.fillStyle = 'rgba(255,176,32,.13)';
+        g.fillRect(x - (w - 36) * GAP_EQ / AW / 2, 2, (w - 36) * GAP_EQ / AW, h - 13);
+        g.fillStyle = warn;
+        g.fillText(seg.gap >= 3600 ? (seg.gap / 3600).toFixed(1) + 'h'
+                                   : Math.round(seg.gap / 60) + '分', x, 11);
+      }
     }
     g.restore();
   }
@@ -1146,20 +1222,20 @@ function buildChartBg(s, w, h, dpr) {
    * 下端の 1 枚だけに置くとスクロールで見えなくなり、区間を時刻で指す用が
    * 足せない（ログの何分何秒を見ているかが分からない）。 */
   {
-    const span = t1 - t0;
     const STEPS = [10, 30, 60, 120, 300, 600, 900, 1800];
-    const step = STEPS.find(v => span / v <= 9) || 3600;
+    const step = STEPS.find(v => AW / v <= 9) || 3600;
     g.strokeStyle = css('--line'); g.lineWidth = 1;
     g.fillStyle = css('--mute'); g.font = '9px -apple-system,sans-serif';
     g.textAlign = 'center';
-    // 刻みは**経過時間**で置く。絶対時刻で刻むと開始が端数のぶんずれて
-    // 「9:59」のような目盛りになり、区間を時刻で指すときに読みにくい
-    for (let e = step; e <= span; e += step) {
-      const x = X(t0 + e);
+    /* 刻みは**軸の上で等間隔**に置き、札は**その位置の実経過時間**を出す。
+     * 潰した区間があると札は等間隔にならないが、札が嘘になるよりよい。
+     * 刻みを経過時間で置くと、潰した空白の中に目盛りが落ちる。 */
+    for (let e = step; e <= AW; e += step) {
+      const x = 30 + (w - 36) * (e / AW);
       g.globalAlpha = .5;
       g.beginPath(); g.moveTo(x, 2); g.lineTo(x, h - 11); g.stroke();
       g.globalAlpha = 1;
-      g.fillText(mmss(e), x, h - 2);
+      g.fillText(mmss(aToT(A0 + e) - t0), x, h - 2);
     }
   }
 
@@ -1254,7 +1330,8 @@ function bindCursor(cv) {
     const rect = cv.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const t0 = rows[0].t, t1 = rows[rows.length - 1].t || 1;
-    const t = t0 + (t1 - t0) * Math.max(0, Math.min(1, (cx - 30) / (rect.width - 36)));
+    const [A0, A1] = axisSpan();
+    const t = aToT(A0 + (A1 - A0) * Math.max(0, Math.min(1, (cx - 30) / (rect.width - 36))));
     let bi = 0, bd = Infinity;
     for (let i = 0; i < rows.length; i++) {
       const d = Math.abs(rows[i].t - t);
@@ -1362,22 +1439,33 @@ $('pFwd').onclick  = () => seekTo(playT + 10);
 let seeking = false;
 
 function initSeek() {
-  const [t0, t1] = tSpan();
+  // 軸座標で刻む。空白を潰していれば、つまみも駐車に時間を食われない
+  const [a0, a1] = axisSpan();
   const s = $('seek');
-  s.max = Math.max(1, Math.round((t1 - t0) * 10));
+  s.max = Math.max(1, Math.round((a1 - a0) * 10));
   s.disabled = !rows.length;
-  syncSeek(t0);
+  syncSeek(tSpan()[0]);
 }
 
 function syncSeek(t) {
-  const s = $('seek'), [t0, t1] = tSpan();
-  if (t1 <= t0) return;
+  const s = $('seek'), [a0, a1] = axisSpan();
+  if (a1 <= a0) return;
+  const a = tToA(t);
   // つまみを掴んでいる間は値を書き戻さない（掴んだ位置と競合する）
-  if (!seeking) s.value = Math.round((t - t0) * 10);
-  s.style.setProperty('--p', ((t - t0) / (t1 - t0) * 100).toFixed(2) + '%');
+  if (!seeking) s.value = Math.round((a - a0) * 10);
+  s.style.setProperty('--p', ((a - a0) / (a1 - a0) * 100).toFixed(2) + '%');
 }
 
-$('seek').addEventListener('input', () => seekTo(tSpan()[0] + +$('seek').value / 10));
+$('seek').addEventListener('input',
+  () => seekTo(aToT(axisSpan()[0] + +$('seek').value / 10)));
+
+/* 潰し方が変わると軸が伸び縮みする。チャートもつまみも取り直す。
+ * 状態は記憶する（連結して見返すときは毎回同じ設定で見たい）。 */
+$('gsq').onchange = () => {
+  try { localStorage.setItem('mc52_gsq', $('gsq').checked ? '1' : '0'); } catch (e) {}
+  initSeek(); syncSeek(viewT != null ? viewT : tSpan()[0]); drawCharts();
+};
+try { if (localStorage.getItem('mc52_gsq') === '0') $('gsq').checked = false; } catch (e) {}
 $('seek').addEventListener('pointerdown', () => { seeking = true; });
 for (const ev of ['pointerup', 'pointercancel'])
   addEventListener(ev, () => { seeking = false; });
@@ -1981,6 +2069,7 @@ function refresh() {
   if (isFinite(tol) && tol > 0) localStorage.setItem('mc52_tol', String(tol));
   assignGears(GEAR_K, tol);
   // 地図側の失敗でチャートを巻き込まない
+  buildAxis();     // 空白の潰しはチャートとシークバーが共有する
   try { drawMap(); buildPath(); computeHeadings(); } catch (e) { console.warn('map:', e); }
   drawCharts();
   const n = rows.length;
