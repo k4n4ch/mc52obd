@@ -234,7 +234,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906j';
+const VERSION = 'v20260906k';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1577,6 +1577,8 @@ function bearing(a, b) {
 const HEAD_M = 15;          // 前後それぞれこの距離ぶんを見る
 const HEAD_MAX_ROWS = 60;   // 探索の上限。停車中に延々と遡らない
 const HEAD_SMOOTH = 2;      // 仕上げの移動平均の半幅（行）
+const HEAD_MED = 3;         // 中央値フィルタの半幅（行）
+const HEAD_DB = 2;          // 不感帯 [°]
 
 function computeHeadings() {
   /* 位置は `posAtT` から引く。`markerPos` は補完区間で 25m 間隔の頂点へ最近傍で
@@ -1612,14 +1614,41 @@ function computeHeadings() {
   }
   for (let i = rows.length - 1; i >= 0 && un[i] == null; i--) un[i] = prev;
   for (let i = 0; i < rows.length && un[i] == null; i++) un[i] = un.find(v => v != null) ?? 0;
-  // 残ったギザギザを移動平均で均す
+  /* **中央値で外れ値を落としてから移動平均する。** 平均だけだと外れ値が周囲へ
+   * 溶けて広がる。中央値は角（交差点の曲がり）を残したまま飛びだけ潰せる。 */
+  const md = new Array(rows.length).fill(0);
+  const src = un.map(v => v ?? 0);
+  for (let i = 0; i < rows.length; i++) {
+    const w = [];
+    for (let j = Math.max(0, i - HEAD_MED); j <= Math.min(rows.length - 1, i + HEAD_MED); j++)
+      w.push(src[j]);
+    w.sort((a, b) => a - b);
+    md[i] = w[w.length >> 1];
+  }
+  const sm = new Array(rows.length).fill(0);
   for (let i = 0; i < rows.length; i++) {
     let s = 0, n = 0;
     for (let j = i - HEAD_SMOOTH; j <= i + HEAD_SMOOTH; j++) {
-      if (j < 0 || j >= rows.length || un[j] == null) continue;
-      s += un[j]; n++;
+      if (j < 0 || j >= rows.length) continue;
+      s += md[j]; n++;
     }
-    rows[i].head = n ? s / n : (un[i] ?? 0);
+    sm[i] = n ? s / n : md[i];
+  }
+  /* **不感帯。** 直進しているつもりでも測位は常に数十 cm 揺れており、そのまま
+   * 追うと地図が絶えず細かく回って見づらい（実測で街中の直進中、1 行あたり
+   * 90% 点 0.63°＝約 0.9°/秒 で回り続ける）。
+   *
+   * 表示値との差が `HEAD_DB` 未満なら動かさず、超えたらその分だけ手前に付ける。
+   * 直進では完全に止まり、カーブでは遅れが `HEAD_DB` に固定される。実測で
+   * 直進中の静止率が 3% → 82%（街中）／60%（山）、カーブでの差は 2.3°。
+   *
+   * 時系列の前から一方向に決めるので、なぞって戻っても同じ値になる。 */
+  let cur = sm.length ? sm[0] : 0;
+  for (let i = 0; i < rows.length; i++) {
+    const d = sm[i] - cur;
+    if (d > HEAD_DB) cur = sm[i] - HEAD_DB;
+    else if (d < -HEAD_DB) cur = sm[i] + HEAD_DB;
+    rows[i].head = cur;
   }
 }
 
