@@ -167,7 +167,7 @@ button:disabled{opacity:.35}
 </style>
 
 <div id="bar">
-  <input type="file" id="file" accept=".csv,text/csv">
+  <input type="file" id="file" accept=".csv,text/csv" multiple>
   <button id="optBtn" title="判定の係数と丁数の設定、読み込んだログの診断">⚙ 設定</button>
 </div>
 
@@ -231,7 +231,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906c';
+const VERSION = 'v20260906d';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -382,9 +382,11 @@ const COLS = {
   t:['t_sec'], rpm:['rpm','0C_rpm'], spd:['speed_obd','0D_speed'], skew:['skew_ms'],
   thr:['throttle','11_tps'], ect:['ect','05_ect'], volt:['volt','42_volt'],
   lat:['lat'], lon:['lon'], gspd:['speed_gps'], acc:['gps_acc'],
+  iso:['iso_time'],
 };
 
-function parseCsv(text) {
+/** 1 ファイルを行の配列にする。**時刻の付け直しと連結は `loadFiles` が行う。** */
+function parseCsv(text, src) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) throw new Error('空のファイル');
   const head = lines[0].split(',').map(s => s.trim());
@@ -399,8 +401,13 @@ function parseCsv(text) {
   const out = [];
   for (let i = 1; i < lines.length; i++) {
     const a = lines[i].split(',');
+    /* `t0` は**元ファイルの t_sec**。複数を繋ぐと `t` は共通原点からの秒数へ
+     * 付け直されるが、時間表示の生値は `cutlog.py` への指定に使うので、
+     * 切り出せる値＝元ファイルの秒数を残しておく。 */
     const r = {
-      t: num(a, pick.t) ?? i, rpm: num(a, pick.rpm), spd: num(a, pick.spd),
+      t: num(a, pick.t) ?? i, t0: num(a, pick.t) ?? i, src,
+      ms: pick.iso === undefined ? null : Date.parse(a[pick.iso]),
+      rpm: num(a, pick.rpm), spd: num(a, pick.spd),
       thr: num(a, pick.thr), ect: num(a, pick.ect), volt: num(a, pick.volt),
       lat: num(a, pick.lat), lon: num(a, pick.lon), gspd: num(a, pick.gspd),
       acc: num(a, pick.acc),
@@ -408,8 +415,37 @@ function parseCsv(text) {
     };
     out.push(r);
   }
-  dropBadFixes(out);
-  alignRpm(out);
+  return out;
+}
+
+/* ── 複数ファイルの連結 ────────────────────────────────
+ *
+ * その日の走行は IG の入切でファイルが分かれる（実測で 1 日 5 本、駐車を
+ * 1.5〜37 分挟む）。まとめて 1 画面で見るために連結する。
+ *
+ * **`t_sec` はどのファイルも 0 始まり**なので、そのまま繋ぐと時刻が巻き戻る。
+ * 行ごとの `iso_time`（UTC 絶対時刻）から共通原点の秒数へ引き直す。オフセットを
+ * 足すのではなく引き直すので、ファイルごとの時計のずれも同時に消える。
+ *
+ * `iso_time` を持たない形式（Mac 側 `logger.py`）は連結できない。1 本だけ受ける。 */
+function mergeSessions(sets) {
+  const named = sets.filter(s => s.rows.length);
+  if (!named.length) throw new Error('読める行が無い');
+  if (named.length === 1) { const r = named[0].rows; r.sessions = [named[0].src]; return r; }
+  for (const s of named)
+    if (s.rows.some(r => !isFinite(r.ms)))
+      throw new Error(`${s.src} に iso_time が無い。複数の連結には絶対時刻が要る`);
+  named.sort((a, b) => a.rows[0].ms - b.rows[0].ms);
+  const origin = named[0].rows[0].ms;
+  const out = [];
+  named.forEach((s, i) => {
+    for (const r of s.rows) { r.t = (r.ms - origin) / 1000; r.sess = i; }
+    // 各セッションの先頭に印を付ける。チャートの区切りに使う
+    s.rows[0].sessTop = true;
+    out.push(...s.rows);
+  });
+  out.sort((a, b) => a.t - b.t);
+  out.sessions = named.map(s => s.src);
   return out;
 }
 
@@ -466,6 +502,9 @@ function dropBadFixes(rows) {
     while (b + 1 < fix.length && rows[fix[b + 1]].t - rows[fix[a]].t < GPS_DEV_WIN) b++;
     const A = rows[fix[a]], B = rows[fix[b]], dt = B.t - A.t;
     if (dt < GPS_DEV_WIN * 0.6 || A.spd == null || B.spd == null) continue;
+    // 別セッションをまたぐ窓は使わない。駐車の分だけ時間が空き、
+    // 距離ゼロ・時間 37 分で「GPS が動いていない」と誤判定する
+    if (A.sess !== B.sess) continue;
     const ref = (A.spd + B.spd) / 2 * speedCorr();
     const v = havM(A.lat, A.lon, B.lat, B.lon) / dt * 3.6;
     if (Math.abs(v - ref) > GPS_DEV_KMH) bad.add(fix[a]);
@@ -516,7 +555,9 @@ function alignRpm(rows) {
     let k = j;
     while (k > 0 && tr[k] > want) k--;
     const a = rows[k], b = rows[Math.min(k+1, rows.length-1)];
-    if (a.rpm == null || b.rpm == null || tr[k+1] == null || tr[k+1] <= tr[k]) {
+    // 挟む 2 点が離れすぎていれば内挿しない（セッションの切れ目をまたいだ場合）
+    if (a.rpm == null || b.rpm == null || tr[k+1] == null || tr[k+1] <= tr[k]
+        || tr[k+1] - tr[k] > 5) {
       r.rpmAl = r.rpm;
     } else {
       const f = Math.max(0, Math.min(1, (want - tr[k]) / (tr[k+1] - tr[k])));
@@ -1084,6 +1125,21 @@ function buildChartBg(s, w, h, dpr) {
   for (const [a, b] of stopSpans(3)) {
     const x0 = X(a), x1 = X(b);
     if (x1 > x0) g.fillRect(x0, 2, Math.max(1.5, x1 - x0), h - 8);
+  }
+
+  /* 連結した日のセッションの切れ目。**時間軸は実時間のまま**にしてあるので、
+   * 駐車の分だけ空白が空く。そこが記録の切れ目だと分かるよう縦線を引く
+   * （軸を非線形に潰すと、傾きから加速度を読む見方が壊れる）。 */
+  if (rows.sessions && rows.sessions.length > 1) {
+    g.save();
+    g.strokeStyle = css('--warn') || '#ffb020'; g.lineWidth = 1;
+    g.setLineDash([3, 3]);
+    for (const r of rows) {
+      if (!r.sessTop) continue;
+      const x = X(r.t);
+      g.beginPath(); g.moveTo(x, 2); g.lineTo(x, h - 6); g.stroke();
+    }
+    g.restore();
   }
 
   /* 時間軸の目盛り。**6 枚が X 軸を共有しているので全チャートに引く。**
@@ -1828,7 +1884,9 @@ function buildPath() {
   for (let i = 1; i < rows.length; i++) {
     const dt = rows[i].t - rows[i - 1].t;
     const v0 = (rows[i - 1].spdTrue ?? 0) / 3.6, v1 = (rows[i].spdTrue ?? 0) / 3.6;
-    cumS[i] = cumS[i - 1] + (dt > 0 ? (v0 + v1) / 2 * dt : 0);
+    /* `integrateDistance` と同じく 30 秒で切る。セッションの切れ目で最後の行が
+     * 走行中の速度を持っていると、駐車の数十分ぶんの距離が積算に入る。 */
+    cumS[i] = cumS[i - 1] + (dt > 0 && dt <= 30 ? (v0 + v1) / 2 * dt : 0);
   }
 }
 
@@ -1887,8 +1945,13 @@ function setCursor(i) {
   cursor = i;
   const r = i >= 0 ? rows[i] : null;
   const [t0, t1] = tSpan();
-  $('cur').textContent = r
-    ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)} (${r.t.toFixed(0)}s)` : '';
+  /* 括弧内は **`cutlog.py` へ渡せる値**。連結しているときは付け直した秒数では
+   * 切り出せないので、出所のセッション番号と元ファイルの `t_sec` を出す。 */
+  const multi = rows.sessions && rows.sessions.length > 1;
+  const raw = !r ? '' : multi ? `#${(r.sess ?? 0) + 1} ${(r.t0 ?? r.t).toFixed(0)}s`
+                              : `${(r.t0 ?? r.t).toFixed(0)}s`;
+  $('cur').textContent = r ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)} (${raw})` : '';
+  $('cur').title = r && multi ? r.src || '' : '';
   syncSeek(viewT != null ? viewT : (r ? r.t : t0));
   for (const s of SERIES) {
     const el = $('v_' + s.key);
@@ -1926,7 +1989,9 @@ function refresh() {
   const rat = rows.filter(r => r.ratio != null).length;
   const dur = n ? (rows[n-1].t - rows[0].t) : 0;
   const al = rows.length && rows[0].hasSkew ? 'skew列' : '周期推定';
-  $('stat').textContent = `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
+  const ns = rows.sessions ? rows.sessions.length : 1;
+  $('stat').textContent = (ns > 1 ? `${ns} 本を連結 / ` : '')
+    + `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
     + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`
     + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)')
     + (speedCorr() !== 1 ? ` / 車速 ×${speedCorr().toFixed(4)}` : '')
@@ -1947,13 +2012,19 @@ function statFills(base) {
   if (ng) console.warn('[補完できず]', fills.notes);
 }
 
-$('file').onchange = e => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const rd = new FileReader();
-  rd.onload = () => {
+$('file').onchange = async e => {
+  const files = [...e.target.files];
+  if (!files.length) return;
+  {
     try {
-      rows = parseCsv(rd.result);
+      /* **捨てと時刻補正は連結した後で掛ける。** 先に個別へ掛けると、
+       * 中央周期の推定がファイルごとに揺れる。 */
+      const sets = [];
+      for (const f of files)
+        sets.push({src: f.name, rows: parseCsv(await f.text(), f.name)});
+      rows = mergeSessions(sets);
+      dropBadFixes(rows);
+      alignRpm(rows);
       drawMap._fitted = false;   // 新しいログを読んだら範囲を取り直す
       computeRatios();           // fitK は比を見るので先に用意する
       $('estsp').disabled = false;
@@ -1982,8 +2053,7 @@ $('file').onchange = e => {
     } catch (err) {
       $('stat').textContent = '読み込み失敗: ' + err.message;
     }
-  };
-  rd.readAsText(f);
+  }
 };
 /* k は固定だが、ログから当てた値を併記する。両者が離れていれば前提のどこかが
  * 崩れている合図になる（`0D` の切り捨てを見つけたのはこの比較だった）。 */
