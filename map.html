@@ -87,6 +87,21 @@ button:disabled{opacity:.35}
 #mapc, #omapc{position:absolute; inset:0}
 #map.off, #omap.off, #side.off{display:none}
 #pView{display:flex; gap:.3rem; margin-left:auto}
+.brk{flex:1 0 100%; height:0}        /* ここで必ず折り返す */
+/* 残り幅を全部取り、時間表示を右に残す。進捗は --p（0〜100%）で塗る */
+#seek{flex:1 1 auto; min-width:5rem; -webkit-appearance:none; appearance:none;
+  height:1rem; margin:0; background:transparent; cursor:pointer}
+#seek:disabled{cursor:default; opacity:.4}
+#seek::-webkit-slider-runnable-track{height:.3rem; border-radius:.15rem;
+  background:linear-gradient(to right, var(--accent) var(--p,0%), var(--line) var(--p,0%))}
+#seek::-webkit-slider-thumb{-webkit-appearance:none; appearance:none; margin-top:-.26rem;
+  width:.82rem; height:.82rem; border-radius:50%;
+  background:var(--fg); border:2px solid var(--accent)}
+#seek::-moz-range-track{height:.3rem; border-radius:.15rem; background:var(--line)}
+#seek::-moz-range-progress{height:.3rem; border-radius:.15rem; background:var(--accent)}
+#seek::-moz-range-thumb{width:.82rem; height:.82rem; border:2px solid var(--accent);
+  border-radius:50%; background:var(--fg)}
+#seek:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 #pView button.on{background:#25303f; border-color:var(--accent)}
 /* ナビ。内側を四方へ 21% 広げてから回すと、45 度でも角に隙間が出ない
    （対角は √2 = 1.414 倍。142% を確保する）。Leaflet は `.leaflet-map-pane` に
@@ -182,6 +197,12 @@ button:disabled{opacity:.35}
     <button id="pFit" title="経路全体を映す地図">全景</button>
     <button id="pChart" title="車速・ギヤ・回転数などの時系列">グラフ</button>
   </div>
+  <!-- ペインの 3 ボタンまでを 1 行目に固定し、ここで必ず改行する -->
+  <div class="brk"></div>
+  <!-- ナビと全景を並べるとチャートが消え、位置を指す手段が無くなる。
+       行が増減して他が動かないよう常に出しておく -->
+  <input type="range" id="seek" min="0" max="1000" step="1" value="0" disabled
+         title="再生位置" aria-label="再生位置">
   <!-- 位置と全長。倍率や送り戻しと同じ量を指しているので再生バーに置く -->
   <span id="cur"></span>
 </div>
@@ -208,7 +229,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906a';
+const VERSION = 'v20260906b';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1272,6 +1293,36 @@ requestAnimationFrame(playTick);
 $('pPlay').onclick = () => setPlay(!playing);
 $('pBack').onclick = () => seekTo(playT - 5);
 $('pFwd').onclick  = () => seekTo(playT + 10);
+
+/* ── シークバー ────────────────────────────────────────
+ *
+ * 位置指定はチャートを横になぞる操作で足りていたが、**ナビと全景を並べると
+ * チャートが消えて位置を指す手段が無くなる**。行が増減して他が動かないよう、
+ * グラフの有無にかかわらず常に出す。
+ *
+ * 刻みは 0.1 秒。3 時間のログでも 108,000 段で、画面の画素より細かい。 */
+let seeking = false;
+
+function initSeek() {
+  const [t0, t1] = tSpan();
+  const s = $('seek');
+  s.max = Math.max(1, Math.round((t1 - t0) * 10));
+  s.disabled = !rows.length;
+  syncSeek(t0);
+}
+
+function syncSeek(t) {
+  const s = $('seek'), [t0, t1] = tSpan();
+  if (t1 <= t0) return;
+  // つまみを掴んでいる間は値を書き戻さない（掴んだ位置と競合する）
+  if (!seeking) s.value = Math.round((t - t0) * 10);
+  s.style.setProperty('--p', ((t - t0) / (t1 - t0) * 100).toFixed(2) + '%');
+}
+
+$('seek').addEventListener('input', () => seekTo(tSpan()[0] + +$('seek').value / 10));
+$('seek').addEventListener('pointerdown', () => { seeking = true; });
+for (const ev of ['pointerup', 'pointercancel'])
+  addEventListener(ev, () => { seeking = false; });
 $('pSpd').innerHTML = SPEEDS.map(s =>
   `<button data-s="${s}"${s === 1 ? ' class="on"' : ''}>${s}×</button>`).join('');
 $('pSpd').querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -1711,6 +1762,7 @@ function setCursor(i) {
   const [t0, t1] = tSpan();
   $('cur').textContent = r
     ? `${mmss(r.t - t0)} / ${mmss(t1 - t0)} (${r.t.toFixed(0)}s)` : '';
+  syncSeek(viewT != null ? viewT : (r ? r.t : t0));
   for (const s of SERIES) {
     const el = $('v_' + s.key);
     const v = r ? r[s.key] : null;
@@ -1781,7 +1833,7 @@ $('file').onchange = e => {
       $('calsp').disabled = false;
       $('pNav').disabled = false;
       for (const id of ['pPlay', 'pBack', 'pFwd']) $(id).disabled = false;
-      playT = rows[0].t; setPlay(false);
+      playT = rows[0].t; setPlay(false); initSeek();
       showKDiag();
       // **丁数の自動推定より先にキャンバスを作る。** 推定は onSprk 経由で
       // refresh を呼ぶので、後に置くと描画対象が無いまま走る
