@@ -134,7 +134,7 @@ button:disabled{opacity:.35}
           display:flex; justify-content:space-between; align-items:baseline}
 .chart h3 span{color:var(--fg); font-size:.82rem; font-weight:700}
 /* 縦方向のスクロールはブラウザに渡し、横方向のドラッグだけをスクラブに使う。
- * touch-action:none にすると縦スクロールまで奪われ、6 枚を積んだ側が
+ * touch-action:none にすると縦スクロールまで奪われ、7 枚を積んだ側が
  * 事実上スクロールできなくなる。 */
 .chart canvas{width:100%; height:74px; display:block; touch-action:pan-y}
 
@@ -232,7 +232,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906g';
+const VERSION = 'v20260906h';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -382,7 +382,7 @@ let cursor = -1;
 const COLS = {
   t:['t_sec'], rpm:['rpm','0C_rpm'], spd:['speed_obd','0D_speed'], skew:['skew_ms'],
   thr:['throttle','11_tps'], ect:['ect','05_ect'], volt:['volt','42_volt'],
-  lat:['lat'], lon:['lon'], gspd:['speed_gps'], acc:['gps_acc'],
+  lat:['lat'], lon:['lon'], gspd:['speed_gps'], acc:['gps_acc'], alt:['alt'],
   iso:['iso_time'],
 };
 
@@ -411,7 +411,7 @@ function parseCsv(text, src) {
       rpm: num(a, pick.rpm), spd: num(a, pick.spd),
       thr: num(a, pick.thr), ect: num(a, pick.ect), volt: num(a, pick.volt),
       lat: num(a, pick.lat), lon: num(a, pick.lon), gspd: num(a, pick.gspd),
-      acc: num(a, pick.acc),
+      acc: num(a, pick.acc), alt: num(a, pick.alt),
       skew: num(a, pick.skew),
     };
     out.push(r);
@@ -512,7 +512,7 @@ function dropBadFixes(rows) {
   }
 
   for (const i of bad) {
-    rows[i].lat = rows[i].lon = rows[i].gspd = null;
+    rows[i].lat = rows[i].lon = rows[i].gspd = rows[i].alt = null;
     rows[i].badFix = true;
   }
   rows.badFixes = bad.size;
@@ -1121,7 +1121,7 @@ function addLegend(m) {
 }
 
 // ── チャート ─────────────────────────────────────────────
-// 依存ゼロの自前描画。6 枚の小倍数（small multiples）で X 軸を共有する。
+// 依存ゼロの自前描画。7 枚の小倍数（small multiples）で X 軸を共有する。
 // 各パネルは単一系列なので凡例は置かない（見出しが系列名を兼ねる）。
 const SERIES = [
   {key:'spdTrue', name:'車速', unit:'km/h', fix:0},   // 補正後（真の車速）
@@ -1131,6 +1131,9 @@ const SERIES = [
   {key:'thr',  name:'スロットル', unit:'%', fix:1},
   {key:'ect',  name:'水温',   unit:'℃',   fix:0},
   {key:'volt', name:'電圧',   unit:'V',    fix:2},
+  /* 標高は測位由来なので、捨てた区間では欠ける（破線になる）。端末側で既に
+   * 均されており、隣接点の差は標準偏差 0.37m・最大 2.1m しかないので生で描く。 */
+  {key:'alt',  name:'標高',   unit:'m',    fix:0},
 ];
 
 function buildCharts() {
@@ -1152,7 +1155,7 @@ function drawCharts() {
 }
 
 /* 系列も目盛りも停車帯も、再生中は一切変わらない。毎フレーム全行をなぞると
- * 6 枚 × 13,000 点で端末が持たないので、**カーソル以外をオフスクリーンへ
+ * 7 枚 × 13,000 点で端末が持たないので、**カーソル以外をオフスクリーンへ
  * 1 回だけ描いて使い回す**。データ・k・判定窓・丁数が変われば chartEpoch を
  * 進めて捨てる。再生のためだけでなく、スクラブ操作も同じだけ軽くなる。 */
 let chartEpoch = 0;
@@ -1218,7 +1221,7 @@ function buildChartBg(s, w, h, dpr) {
     g.restore();
   }
 
-  /* 時間軸の目盛り。**6 枚が X 軸を共有しているので全チャートに引く。**
+  /* 時間軸の目盛り。**7 枚が X 軸を共有しているので全チャートに引く。**
    * 下端の 1 枚だけに置くとスクロールで見えなくなり、区間を時刻で指す用が
    * 足せない（ログの何分何秒を見ているかが分からない）。 */
   {
@@ -2108,9 +2111,13 @@ function refresh() {
   const al = rows.length && rows[0].hasSkew ? 'skew列' : '周期推定';
   const ns = rows.sessions ? rows.sessions.length : 1;
   const km = totalDistM() / 1000;
+  /* 平均は**走行していた時間で割る**。全体で割ると停車のぶん低く出て実感とずれる
+   * （実測で 58.3km/h に対し 50.4km/h）。 */
+  const mv = movingTimeS();
   $('stat').textContent = (ns > 1 ? `${ns} 本を連結 / ` : '')
     + `${n} 行 / ${(dur/60).toFixed(1)} 分 / GPS ${gps} 点 / `
-    + `走行 ${km.toFixed(1)}km / `
+    + `走行 ${km.toFixed(1)}km・${(mv/60).toFixed(0)}分`
+    + (mv > 0 ? `（平均 ${(km*1000/mv*3.6).toFixed(1)}km/h）` : '') + ' / '
     + `ギヤ確定 ${rat ? (known/rat*100).toFixed(0) : 0}%`
     + ($('align').checked ? ` (時刻補正: ${al})` : ' (補正なし)')
     + (speedCorr() !== 1 ? ` / 車速 ×${speedCorr().toFixed(4)}` : '')
@@ -2120,6 +2127,19 @@ function refresh() {
 /* 総走行距離。**車速の積分で出す。** GPS はトンネルで落ちるので経路長からは
  * 出せない。`cumS` と同じ規則（補正後の車速、30 秒を超える間隔は捨てる）で計算
  * するが、地図の失敗に巻き込まれないよう独立して持つ。 */
+/** 走行していた時間 [s]。停車（車速 0）は数えない。距離と同じ 30 秒の上限を使う。 */
+function movingTimeS() {
+  let s = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const dt = rows[i].t - rows[i - 1].t;
+    if (!(dt > 0 && dt <= 30)) continue;
+    const v0 = rows[i - 1].spdTrue, v1 = rows[i].spdTrue;
+    if (v0 == null || v1 == null) continue;
+    if ((v0 + v1) / 2 > 0) s += dt;
+  }
+  return s;
+}
+
 function totalDistM() {
   let d = 0;
   for (let i = 1; i < rows.length; i++) {
