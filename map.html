@@ -181,6 +181,8 @@ button:disabled{opacity:.35}
     <select id="sf"></select></label>
   <button id="estsp" disabled title="GPS 速度との一致から前後の丁数を推定する。速度比だけでは一意に決まらないため候補も出す">丁数推定</button>
   <button id="calsp" disabled title="表示車速が GPS と一致するよう校正トリムを求める。丁数比だけでは実測と 1% 弱ずれるため（ECU の想定円周と実際の転がり円周の差）。走行画面と共有する">車速校正</button>
+  <label title="ナビに重ねる回転数・車速のゲージの見た目">ゲージ
+    <select id="gsty"></select></label>
   <!-- 行数・確定率・補完の結果は読み込み時に一度見れば足りる診断で、走行を
        見返すあいだは要らない。補完を採らなかった理由もここへ出る -->
   <div class="info"><span id="stat">CSV を読み込む</span><span id="ver"></span></div>
@@ -229,7 +231,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906b';
+const VERSION = 'v20260906c';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1546,6 +1548,27 @@ function setNav(on) {
   setTimeout(settle, 220);
 }
 
+/* ── ゲージの様式 ──────────────────────────────────────
+ *
+ * ナビに重ねる回転数・車速の見た目を選べるようにする。**既定は現行の円弧**で、
+ * 選ばなければ見た目は変わらない。選択は `localStorage` に残す。 */
+const GAUGE_STYLES = [['arc', '円弧'], ['classic', 'クラシック針'],
+                      ['sport', 'スポーツ針'], ['minimal', 'ミニマル針']];
+const GAUGE_KEY = 'mc52_gauge';
+
+function gaugeStyle() {
+  let v = null;
+  try { v = localStorage.getItem(GAUGE_KEY); } catch (e) { /* 使えなければ既定 */ }
+  return GAUGE_STYLES.some(s => s[0] === v) ? v : 'arc';
+}
+
+$('gsty').innerHTML = GAUGE_STYLES.map(([k, n]) => `<option value="${k}">${n}</option>`).join('');
+$('gsty').value = gaugeStyle();
+$('gsty').onchange = () => {
+  try { localStorage.setItem(GAUGE_KEY, $('gsty').value); } catch (e) {}
+  if (navOn) navApply(cursor, true);
+};
+
 /** 回転数・車速のゲージとギヤの段数を地図に重ねる。 */
 function drawNavGauge(r) {
   const cv = $('navg'), dpr = devicePixelRatio || 1;
@@ -1558,24 +1581,128 @@ function drawNavGauge(r) {
   g.clearRect(0, 0, w, h);
   // 画面が低いときはゲージも小さくする。下限を高く取ると地図を潰す
   const R = Math.min(58, Math.max(24, Math.min(w, h) * 0.16));
-  const arc = (cx, cy, val, max, lab, unit) => {
-    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
-    // 地図は明暗どちらにもなるので、暗い円板を敷いてから描く
-    g.fillStyle = 'rgba(16,20,26,.55)';
+  const ACC = css('--accent') || '#4a9eff';
+  const num = val => val == null ? '--' : String(Math.round(val));
+  /** 中央寄せの文字。`edge` を付けると黒で縁取る（明るい地図でも読める）。 */
+  const say = (s, x, y, px, col, weight, mono, edge) => {
+    g.textAlign = 'center';
+    g.font = `${weight} ${px}px ${mono ? 'ui-monospace,monospace' : 'system-ui,sans-serif'}`;
+    if (edge) {
+      g.save(); g.lineJoin = 'round'; g.lineWidth = Math.max(3, px * 0.22);
+      g.strokeStyle = 'rgba(0,0,0,.85)'; g.strokeText(s, x, y); g.restore();
+    }
+    g.fillStyle = col; g.fillText(s, x, y);
+  };
+  const plate = (cx, cy, a) => {
+    g.fillStyle = `rgba(16,20,26,${a})`;
     g.beginPath(); g.arc(cx, cy, R + 6, 0, Math.PI * 2); g.fill();
+  };
+  const frac = (val, max) => Math.max(0, Math.min(1, (val || 0) / max));
+
+  // A 現行。円弧と中央の数字だけ
+  const gArc = (cx, cy, val, max, unit) => {
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
+    plate(cx, cy, .55);
     g.lineWidth = 7; g.lineCap = 'round';
     g.strokeStyle = 'rgba(255,255,255,.28)';
     g.beginPath(); g.arc(cx, cy, R, a0, a1); g.stroke();
-    const v = Math.max(0, Math.min(1, (val || 0) / max));
-    g.strokeStyle = css('--accent') || '#4a9eff';
-    g.beginPath(); g.arc(cx, cy, R, a0, a0 + (a1 - a0) * v); g.stroke();
-    g.fillStyle = '#fff'; g.textAlign = 'center';
-    const s = val == null ? '--' : String(Math.round(val));
+    g.strokeStyle = ACC;
+    g.beginPath(); g.arc(cx, cy, R, a0, a0 + (a1 - a0) * frac(val, max)); g.stroke();
+    const s = num(val);
     // 4 桁の回転数は既定の字送りだと円からはみ出すので、桁数で縮める
-    g.font = `600 ${R * (s.length >= 4 ? 0.40 : 0.52)}px ui-monospace,monospace`;
-    g.fillText(s, cx, cy + R * 0.16);
-    g.font = `${R * 0.24}px system-ui,sans-serif`; g.fillStyle = 'rgba(255,255,255,.7)';
-    g.fillText(unit, cx, cy + R * 0.46);
+    say(s, cx, cy + R * 0.16, R * (s.length >= 4 ? 0.40 : 0.52), '#fff', 600, true);
+    say(unit, cx, cy + R * 0.46, R * 0.24, 'rgba(255,255,255,.7)', 400, false);
+  };
+
+  /** 針。白の下に黒を敷いて、明るい地図でも輪郭が残るようにする。 */
+  const needle = (cx, cy, a, len, wide, col) => {
+    g.save(); g.translate(cx, cy); g.rotate(a); g.lineCap = 'round';
+    g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = wide + 2.5;
+    g.beginPath(); g.moveTo(-R * 0.10, 0); g.lineTo(len, 0); g.stroke();
+    g.strokeStyle = col; g.lineWidth = wide;
+    g.beginPath(); g.moveTo(-R * 0.10, 0); g.lineTo(len, 0); g.stroke();
+    g.restore();
+  };
+
+  /* B クラシック針。目盛・数字・レッドゾーンを刻む。
+   * **目盛の刻みと数字の刻みを分ける。** R=58 では 20km/h ごとに数字を置くと
+   * 8 個が円周に並んで読めない。目盛は細かく、数字は間引く。 */
+  const gClassic = (cx, cy, val, max, unit, step, labStep, red) => {
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, sp = a1 - a0;
+    plate(cx, cy, .68);
+    g.strokeStyle = 'rgba(255,255,255,.30)'; g.lineWidth = 2;
+    g.beginPath(); g.arc(cx, cy, R, a0, a1); g.stroke();
+    if (red != null) {
+      g.strokeStyle = css('--bad') || '#ff4d5e'; g.lineWidth = 4;
+      g.beginPath(); g.arc(cx, cy, R, a0 + sp * red / max, a1); g.stroke();
+    }
+    for (let v = 0; v <= max; v += step) {
+      const a = a0 + sp * v / max, big = v % labStep === 0;
+      g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = big ? 2.5 : 1.4;
+      const r1 = R - (big ? 9 : 5);
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      g.lineTo(cx + Math.cos(a) * (R - 1), cy + Math.sin(a) * (R - 1)); g.stroke();
+      if (!big) continue;
+      const lr = R - 21, lab = max > 1000 ? String(v / 1000) : String(v);
+      say(lab, cx + Math.cos(a) * lr, cy + Math.sin(a) * lr + R * 0.08,
+          R * 0.22, 'rgba(255,255,255,.92)', 600, true);
+    }
+    say(unit + (max > 1000 ? ' ×1000' : ''), cx, cy + R * 0.60,
+        R * 0.17, 'rgba(255,255,255,.7)', 400, false);
+    needle(cx, cy, a0 + sp * frac(val, max), R - 12, 3.5, css('--bad') || '#ff5a4d');
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(cx, cy, R * 0.10, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2a3340'; g.beginPath(); g.arc(cx, cy, R * 0.055, 0, Math.PI * 2); g.fill();
+  };
+
+  // C スポーツ針。刻みだけ残し、数字は中央下に大きく。外周に進捗弧
+  const gSport = (cx, cy, val, max, unit, step, red) => {
+    const a0 = Math.PI * 0.78, a1 = Math.PI * 2.22, sp = a1 - a0;
+    plate(cx, cy, .60);
+    for (let v = 0; v <= max; v += step) {
+      const a = a0 + sp * v / max;
+      g.strokeStyle = (red != null && v >= red) ? 'rgba(255,90,80,.95)' : 'rgba(255,255,255,.55)';
+      g.lineWidth = 2.2;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * (R - 7), cy + Math.sin(a) * (R - 7));
+      g.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R); g.stroke();
+    }
+    g.lineWidth = 4; g.lineCap = 'round'; g.strokeStyle = ACC;
+    g.beginPath(); g.arc(cx, cy, R + 5, a0, a0 + sp * frac(val, max)); g.stroke();
+    needle(cx, cy, a0 + sp * frac(val, max), R - 14, 3, '#fff');
+    g.fillStyle = ACC; g.beginPath(); g.arc(cx, cy, R * 0.07, 0, Math.PI * 2); g.fill();
+    const s = num(val);
+    say(s, cx, cy + R * 0.62, R * (s.length >= 4 ? 0.34 : 0.42), '#fff', 700, true);
+    say(unit, cx, cy + R * 0.86, R * 0.18, 'rgba(255,255,255,.75)', 400, false);
+  };
+
+  // D ミニマル針。円板を敷かないので地図が透ける。縁取りだけで読ませる
+  const gMin = (cx, cy, val, max, unit) => {
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, sp = a1 - a0;
+    g.save(); g.shadowColor = 'rgba(0,0,0,.8)'; g.shadowBlur = 8;
+    g.lineWidth = 3; g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.5)';
+    g.beginPath(); g.arc(cx, cy, R, a0, a1); g.stroke();
+    g.strokeStyle = ACC; g.lineWidth = 5;
+    g.beginPath(); g.arc(cx, cy, R, a0, a0 + sp * frac(val, max)); g.stroke();
+    g.restore();
+    needle(cx, cy, a0 + sp * frac(val, max), R - 8, 3.5, '#fff');
+    const s = num(val);
+    say(s, cx, cy + R * 0.18, R * (s.length >= 4 ? 0.42 : 0.54), '#fff', 700, true, true);
+    say(unit, cx, cy + R * 0.48, R * 0.22, '#fff', 400, false, true);
+  };
+
+  /* 様式で切り替える。既定は現行の円弧。**レッドゾーンは 8,500rpm 以上**
+   * （MC52 のレブリミットは 10,500rpm、常用上限がこの辺り）。 */
+  const arc = (cx, cy, val, max, lab, unit) => {
+    const rpm = max > 1000;
+    switch (gaugeStyle()) {
+      case 'classic': gClassic(cx, cy, val, max, unit,
+        rpm ? 1000 : 10, rpm ? 2000 : 40, rpm ? 8500 : null); break;
+      case 'sport':   gSport(cx, cy, val, max, unit,
+        rpm ? 1000 : 20, rpm ? 8500 : null); break;
+      case 'minimal': gMin(cx, cy, val, max, unit); break;
+      default:        gArc(cx, cy, val, max, unit);
+    }
   };
   /* 自車は**画面のちょうど中心**。地図のほうが動く。 */
   g.save();
