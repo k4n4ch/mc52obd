@@ -122,11 +122,16 @@ button:disabled{opacity:.35}
   flex-direction:column; gap:.3rem}
 #navctl button{width:1.9rem; height:1.9rem; padding:0; font-size:.85rem;
   background:rgba(20,24,31,.82); border-color:rgba(255,255,255,.25); color:#fff}
-#side{flex:1 1 0; min-width:0; overflow-y:auto; border-left:1px solid var(--line);
+#side{flex:1 1 0; min-width:0; overflow-y:auto;
       padding:.4rem; display:flex; flex-direction:column; gap:.4rem}
+/* 面の境界。**ナビと全景はどちらも地図**なので、線が無いと切れ目が読めない。
+   隠れた面が間に挟まるため隣接セレクタでは当てられず、表示順の 2 番目に
+   `sep` を付ける（`applyPanes`）。色は明るい地図と暗いチャートの両方で見える
+   中間の灰にする */
+#wrap > .sep{border-left:3px solid var(--mute)}
 @media (max-width:900px){
   #wrap{flex-direction:column}
-  #side{border-left:0; border-top:1px solid var(--line)}
+  #wrap > .sep{border-left:0; border-top:3px solid var(--mute)}
 }
 
 /* ── チャート ── */
@@ -234,7 +239,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906k';
+const VERSION = 'v20260906l';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1707,8 +1712,11 @@ function loadPanes() {
 
 function applyPanes() {
   const vis = visPanes();
+  // 表示順に並べたときの 2 番目に境界線を付ける。1 面だけなら線は要らない
+  const second = PANE_ORDER.filter(k => vis.includes(k))[1];
   for (const k of PANE_ORDER) {
     $(PANE_EL[k]).classList.toggle('off', !vis.includes(k));
+    $(PANE_EL[k]).classList.toggle('sep', k === second);
     $(PANE_BTN[k]).classList.toggle('on', vis.includes(k));
   }
   // 地図は表示されている面だけを作る。drawMap の中で必要な面が用意される
