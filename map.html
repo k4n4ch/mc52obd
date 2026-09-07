@@ -181,7 +181,7 @@ button:disabled{opacity:.35}
 <!-- 走行を見るあいだは触らない設定。既定では畳んで地図と時系列に高さを譲る -->
 <div id="opts" hidden>
   <span id="kdiag" title="k は車速信号の経路だけで決まる閉じた定数で、車両ごとの較正を要しない。このログから当てた値を併記するので、外れていれば前提の崩れに気づける">k —</span>
-  <label title="隣接する段の窓が重ならない上限まで。上限は諸元から算出している">窓±
+  <label title="5-6速（最も狭い境界）での窓。他の境界へは間隔に比例して広がり、1-2速では 3.5 倍になる。上限は全境界がちょうど触れ合う値で、諸元から算出している">窓±
     <input type="number" id="tol" step="0.5" min="0.5" value="4">% <span id="tolMax"></span></label>
   <label title="回転数を車速の取得時刻へ補間して揃える"><input type="checkbox" id="align" checked> 時刻補正</label>
   <label title="ECU は純正 14T/36T 前提で換算する。後は 36T 固定（MC52 は他の設定が売られていない）。表示車速のみ補正し、ギヤ判定は生値で行う">前丁数
@@ -239,7 +239,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260906l';
+const VERSION = 'v20260908a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -283,17 +283,50 @@ const spdTrue = v => v == null ? null : (v === 0 ? 0 : v + 0.5);
 const GEAR_K = 1.0057;
 const GEAR_RPM_MIN = 1700;   // アイドル(約1500)と1速の下限(1828)の間
 
-/* 判定窓の上限は諸元から決まる。窓を |比/予測 - 1| ≤ t と定義しているので、
- * 隣接する 2 段の窓が重ならない条件は
- *     r_a(1-t) > r_b(1+t)   →   t < (s-1)/(s+1),  s = r_a/r_b
- * 全段に同じ窓を使うため、最も狭い 5-6速（s=1.1233）が上限を決めて 5.81%。
- * これを超えると隣の段の領域に食い込み、判定が原理的に破綻する。
+/* 判定窓は段ごと・向きごとに独立させる。窓を |比/予測 - 1| ≤ t と定義すると、
+ * 隣接する 2 段の窓が触れ合う条件は
+ *     r_a(1-t) = r_b(1+t)   →   t = (s-1)/(s+1),  s = r_a/r_b
+ * で、これが**その 2 段の間でだけ**成り立つ上限（TOL_PAIR）。段の間隔は
+ * 1-2速の 20.58% から 5-6速の 5.81% まで 3.5 倍も違う。
+ *
+ * **全段に同じ値を使うと、判定の厳しさが段ごとに 3.5 倍ばらつく。**
+ * 4.0% は 5-6速では境界までの 69% を許すが、1-2速では 19% しか許さない。
+ * 一番余裕のある低速段で一番厳しく切っていた。実測 12 本 28,967 行で、
+ * 棄却の 6.0% のうち大半がこれによる取りこぼしだった。
+ *
+ * そこで**「境界までの何割か」を一定にする**。設定値 tol は最も狭い 5-6速
+ * での窓（＝従来と同じ意味）とし、割合 f = tol / TOL_MAX を他の境界へ適用する。
+ * これで保存済みの設定値がそのまま通り、上限 TOL_MAX（f=1、全境界がちょうど
+ * 触れ合う）も意味を保つ。
+ *
+ * **外側（1速の上・6速の下）には隣が無い**ので比例のしようがなく、tol を
+ * そのまま使う。ここは「隣の段と見分ける」問題ではなく「どの段にも嵌って
+ * いない」を弾く問題だから。滑るクラッチはエンジンを駆動系より速くする
+ * 方向にしか働かないので、**発進の半クラは必ず 1速の上側に出る**。実測でも
+ * 窓を広げた後に残る棄却 539 点のうち 281 点が 1速上側で、この固定が
+ * 効いている。
+ *
+ * 実測 12 本での効果: 確定 94.02% → 98.14%（棄却 6.0% → 1.9%）。
+ * 回復 1,194 点は 1速 +24.5% / 2速 +13.8% と低速段に集中し 6速はゼロ。
+ * **既存のラベルは 1 つも変わらない** —— 割り当ては最近傍で決まっていて、
+ * 動くのは棄却閾値だけだから。
+ *
  * 諸元から算出しているので、車種を変えても手で直す必要は無い。
  * 実際の窓にはこれに加えて車速の量子化ぶん 0.5/車速 が乗る（assignGears）。 */
-const TOL_MAX = Math.min(...GEARS.slice(0, -1).map(n => {
+const TOL_PAIR = {};                       // n → 段 n と n+1 が触れ合う窓 [%]
+for (const n of GEARS.slice(0, -1)) {
   const s = R[n] / R[n + 1];
-  return (s - 1) / (s + 1) * 100;
-}));
+  TOL_PAIR[n] = (s - 1) / (s + 1) * 100;
+}
+const TOL_MAX = Math.min(...Object.values(TOL_PAIR));
+
+/** 段 n で符号付きずれ d のときの判定窓 [%]（量子化ぶんは含まない）。
+ *  d > 0（比が高い＝回転が速すぎる）なら競合は一つ下の段、d < 0 なら一つ上の段。 */
+function gearWin(n, d, tol) {
+  const f = tol / TOL_MAX;
+  if (d > 0) return n > GEARS[0] ? f * TOL_PAIR[n - 1] : tol;
+  return n < GEARS[GEARS.length - 1] ? f * TOL_PAIR[n] : tol;
+}
 
 const GCOL = {1:'--g1',2:'--g2',3:'--g3',4:'--g4',5:'--g5',6:'--g6'};
 
@@ -623,9 +656,41 @@ function assignGears(k, tolPct) {
       const d = Math.abs(r.ratio / (k * R[n]) - 1);
       if (d < bd) { bd = d; best = n; }
     }
+    // ずれの符号で競合する段が変わるので、割り当て先の符号付きずれを取り直す
+    const dev = r.ratio / (k * R[best]) - 1;
     // `speed_obd` は 1km/h 刻みで、±0.5km/h の量子化誤差が比に 0.5/車速 で
     // 効く。低速ほど不利になるので、その不確かさを許容へ足す（ロガーと同じ式）。
-    if (bd <= tol + 0.5 / Math.max(r.spd + 0.5, 1)) { r.gear = best; r.gstate = 'gear'; }
+    const win = gearWin(best, dev, tolPct) / 100 + 0.5 / Math.max(r.spd + 0.5, 1);
+    if (bd <= win) { r.gear = best; r.gstate = 'gear'; }
+  }
+  markShifts();
+}
+
+/* 変速の最中は、どの段にも嵌っていない。**`unk` に混ぜると読めなくなる。**
+ * 判定できない行を意味で分ける方針（stop / slow / unk）の延長で、変速過渡を
+ * 4 つ目として切り出す。これをやらないと `unk` が「正常な通過状態」と
+ * 「k の前提が崩れている」の両方を指してしまい、`?` が出ても意味を持たない。
+ *
+ * 判定は後処理だからできる —— **前後の確定段が違い、かつ実時間で SHIFT_MAX_S
+ * 以内**なら、その間は変速の最中。時間で切らないと、停車や低速区間を挟んで
+ * 段が変わっただけのものまで拾う（実測でそれが棄却の 45% を占めた）。
+ *
+ * 走行中モニタ（index.html）には入れない。先読みが要るうえ、「妥当性を
+ * 走りながら見る」ためにヒステリシスを入れないという方針に反するため。
+ * あちらは近いほうの段をそのまま出す。 */
+const SHIFT_MAX_S = 2.0;
+function markShifts() {
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].gstate !== 'unk') { i++; continue; }
+    let j = i;
+    while (j < rows.length && rows[j].gstate === 'unk') j++;
+    let b = null, a = null;
+    for (let x = i - 1; x >= 0; x--) if (rows[x].gear) { b = rows[x]; break; }
+    for (let x = j; x < rows.length; x++) if (rows[x].gear) { a = rows[x]; break; }
+    if (b && a && b.gear !== a.gear && a.t - b.t <= SHIFT_MAX_S)
+      for (let x = i; x < j; x++) rows[x].gstate = 'shift';
+    i = j;
   }
 }
 
@@ -1027,8 +1092,11 @@ function drawTrack(m, lg, mk) {
     // 停車区間は線を引かない（動いていないので線に意味が無い）。マーカーで示す
     if (run.st === 'stop') continue;
     // ギヤは実線。判定不能な区間は**細い破線**にして、色だけに頼らず区別できる
-    // ようにする。実測と同じ太さだと同じ重みに見えてしまう
-    const dash = run.gear ? null : (run.st === 'slow' ? '1,4' : '3,4');
+    // ようにする。実測と同じ太さだと同じ重みに見えてしまう。
+    // 破線は 3 種を使い分ける: 低速=点、変速中=長い破線、半クラ等=短い破線
+    const dash = run.gear ? null
+               : run.st === 'slow' ? '1,4'
+               : run.st === 'shift' ? '7,3' : '3,4';
     const w = run.gear ? run.w : Math.max(1.5, run.w * 0.5);
     // ケーシングを先に敷く。下地(OSMタイル)とのコントラストはこれで担保する。
     // 破線の区間はケーシングも同じ破線にしないと、隙間が暗く埋まって
@@ -1109,7 +1177,8 @@ function addLegend(m) {
     d.innerHTML = `<b>ギヤ（線の色）</b><div class="row">${sw}
       </div>
       <div class="row" style="margin-top:.25rem">
-      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="3,4"/></svg><span>半クラ・シフト</span>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="7,3"/></svg><span>変速中</span>
+      <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="3,4"/></svg><span>半クラ</span>
       <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--gx')}" stroke-width="2.5" stroke-dasharray="1,4"/></svg><span>低速</span></div>
       <div class="row"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="${css('--g3')}" stroke-width="2.5" stroke-dasharray="5,4" opacity=".72"/></svg><span>位置は推定（縁なし・破線）</span></div>
       <b style="margin-top:.4rem">車速 km/h（線の太さ）</b><div class="wd">${wd}</div>`;
@@ -1942,7 +2011,9 @@ function drawNavGauge(r) {
 
   /* ギヤは左上。コントロールを右上へ逃がしてあるので空いている。
    * 地図は明暗どちらにもなるので、暗い角丸を敷いたうえで文字にも縁を付ける。 */
-  const gs = r.gear ? String(r.gear) : (r.gstate === 'slow' ? '–' : '?');
+  const gs = r.gear ? String(r.gear)
+           : r.gstate === 'slow' ? '–'
+           : r.gstate === 'shift' ? '⇅' : '?';
   // 見出しと数字が触れないよう縦を広めに取る
   const gr = R * 1.15, bw = gr * 1.55, bh = gr * 1.85;
   const bx = 10 + bw / 2, by = 10 + bh / 2;
@@ -2270,7 +2341,7 @@ function showKDiag() {
 // 上限を超えると隣の段に食い込むので、入力を受け付ける段階で丸める
 $('ver').textContent = VERSION;
 $('tol').max = TOL_MAX.toFixed(1);
-$('tolMax').textContent = `(上限 ${TOL_MAX.toFixed(1)})`;
+$('tolMax').textContent = `(5-6速基準・上限 ${TOL_MAX.toFixed(1)})`;
 $('tol').oninput = () => {
   const v = parseFloat($('tol').value);
   if (isFinite(v) && v > TOL_MAX) $('tol').value = TOL_MAX.toFixed(1);
