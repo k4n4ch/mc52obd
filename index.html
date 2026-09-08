@@ -167,7 +167,7 @@ button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
 
 <script>
 'use strict';
-const VERSION = 'v20260908a';
+const VERSION = 'v20260908b';
 const APP = 'mc52obd ' + VERSION;
 
 /* ══════════════════════════════════════════════════════════
@@ -326,6 +326,28 @@ const MIN_GEAR_SPEED = 8;   // これ未満は分母が小さすぎて比が暴�
  * アイドル上限（実測 約1,500）との間に閾値を置けば正当な判定を失わない。 */
 const MIN_GEAR_RPM = 1700;
 
+/* **変速の速さには機構的な上限がある。** シーケンシャル変速機は段を飛ばせず、
+ * 1 回のシフトに有限の時間がかかる。実測 12 走行・段の変化 1,202 回で、1 段の
+ * 変化に最短 0.49 秒・中央 0.73 秒。そこで経過時間に比例した上限を課す。
+ *
+ * これは**クラッチを切って惰性で減速するときの誤判定を弾く**ために要る。回転が
+ * アイドルへ落ちていく途中で比が上の段の窓を次々に通過し、3速 の直後に 6速 が
+ * 出る（実ログ `163443` の t=2825.5）。28km/h・1959rpm は**本物の 6速 と数値的に
+ * 同一**なので、比だけを見ている限り絶対に弾けない。
+ *
+ * **調整値を持たないことが重要。** T を 0.5〜1.5 秒と 3 倍振っても成績は変わらず
+ * （却下される行数が 15 → 56 と増えるだけ）、既知の誤判定 3 件を落とし正しい判定
+ * 5 件を 1 つも消さない。T = 0.5 秒は観測された最短の 1 段変化で、恣意性を避けて
+ * 最も緩い側に寄せてある。
+ *
+ * **これで消せるのは「2 段以上飛ぶ」型だけ。** 1 段だけずれる誤判定（同じログの
+ * t=2824.8、2速 の直後の 3速）は残る。時間や車速の履歴を使えば消せるが、それは
+ * 手元のログに合わせて閾値を 4 つ決める作業で、汎化しない（FINDINGS.md に否定的
+ * 結果として記録）。**本来の解は独自層テーブル `0xD1` の噛み合い状態**で、
+ * ELM327 では届かないため Track B の基板を待つ。 */
+const SHIFT_MIN_S = 0.5;
+let lastGear = null, lastGearT = 0;
+
 /** 現在値からギヤを求める。判定できなければ null を返す。 */
 function currentGear() {
   if (V.rpm === null || V.spd === null || V.rpm < MIN_GEAR_RPM || V.spd < MIN_GEAR_SPEED) return null;
@@ -346,7 +368,14 @@ function currentGear() {
   // 走りながら妥当性を見るのが目的でヒステリシスを入れない方針のため、
   // 先読み遅延を入れてまで `?` に落とす価値が無い。ビュワー側は後処理なので
   // 変速中を `shift` として切り出している（map.html の markShifts）。
-  return bd <= gearWin(best, dev) / 100 + 0.5 / (V.spd + SPD_HALF) ? best : null;
+  if (bd > gearWin(best, dev) / 100 + 0.5 / (V.spd + SPD_HALF)) return null;
+  // 変速の速さの上限。却下した行では last を更新しない（連鎖する誤判定を最後まで弾く）
+  const now = Date.now() / 1000;
+  if (lastGear !== null
+      && Math.abs(best - lastGear) > Math.max(1, Math.round((now - lastGearT) / SHIFT_MIN_S)))
+    return null;
+  lastGear = best; lastGearT = now;
+  return best;
 }
 
 // ── ログ ──────────────────────────────────────────────────
@@ -795,6 +824,8 @@ function setTxt(id, v, digits) {
 
 function markAllStale() {
   ['rpmv','spdv','gearv','thrv','loadv','ectv','voltv'].forEach(id => $(id).classList.add('stale'));
+  // 切断を跨いで変速の速さを見ても意味が無い（間に何段でも変えられる）
+  lastGear = null;
 }
 
 const RPM_MAX = 10500;   // CB250R のレッドゾーン手前まで。バーの目盛り基準

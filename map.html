@@ -239,7 +239,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260908a';
+const VERSION = 'v20260908b';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -663,7 +663,46 @@ function assignGears(k, tolPct) {
     const win = gearWin(best, dev, tolPct) / 100 + 0.5 / Math.max(r.spd + 0.5, 1);
     if (bd <= win) { r.gear = best; r.gstate = 'gear'; }
   }
+  limitShiftRate();
   markShifts();
+}
+
+/* **変速の速さには機構的な上限がある。** シーケンシャル変速機は段を飛ばせず、
+ * 1 回のシフトに有限の時間がかかる。実測 12 走行・段の変化 1,202 回で、1 段の
+ * 変化に最短 0.49 秒・中央 0.73 秒。経過時間に比例した上限を課す。
+ *
+ * 弾きたいのは**クラッチを切って惰性で減速するときの誤判定**。回転がアイドルへ
+ * 落ちていく途中で比が上の段の窓を次々に通過し、3速 の直後に 6速 が出る
+ * （`163443` の t=2825.5、28km/h で 1959rpm）。**その値は本物の 6速 と数値的に
+ * 同一**なので、比だけを見て弾くことは原理的にできない。
+ *
+ * **調整値を持たないことが要点。** T を 0.5〜1.5 秒と 3 倍振っても成績は変わらず
+ * （却下 15 → 56 行と件数が増えるだけ）、既知の誤判定 3 件を落として正しい判定
+ * 5 件を 1 つも消さない。T = 0.5 秒は観測された最短の 1 段変化そのもので、
+ * 恣意性を避けて最も緩い側に寄せてある。
+ *
+ * **消せるのは「2 段以上飛ぶ」型だけで、1 段ずれる誤判定は残る**（同じログの
+ * t=2824.8、2速 の直後の 3速）。車速や段の履歴を使えば消せるが、それは手元の
+ * 12 本に合わせて閾値を 4 つ決める作業になり汎化しない。試して落ちた 2 案とともに
+ * FINDINGS.md に否定的結果として残してある。**本来の解は独自層テーブル `0xD1` の
+ * 噛み合い状態**（`0x00`=イン / `0x01`=ニュートラルまたはクラッチ）で、ELM327 では
+ * フレーム構造が違って届かないため Track B の基板を待つ。
+ *
+ * 走行中モニタ（index.html）も同じ規則を持つ。先読みを使っていないので、
+ * 両者は同じ結果になる。 */
+const SHIFT_MIN_S = 0.5;
+function limitShiftRate() {
+  let last = null, lastT = 0;
+  for (const r of rows) {
+    if (!r.gear) continue;
+    if (last !== null
+        && Math.abs(r.gear - last) > Math.max(1, Math.round((r.t - lastT) / SHIFT_MIN_S))) {
+      // 却下しても last は更新しない。減衰が続く間ずっと弾き続けるため
+      r.gear = null; r.gstate = 'unk';
+      continue;
+    }
+    last = r.gear; lastT = r.t;
+  }
 }
 
 /* 変速の最中は、どの段にも嵌っていない。**`unk` に混ぜると読めなくなる。**
