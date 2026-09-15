@@ -14,4 +14,7 @@ nvs,        data, nvs,      0x9000,   0x5000
 otadata,    data, ota,      0xe000,   0x2000
 app0,       app,  ota_0,    0x10000,  0x200000
 app1,       app,  ota_1,    0x210000, 0x200000
-littlefs,   data, spiffs,   0x410000, 0xBF0000
+# **名前は spiffs にする。** 中身は LittleFS だが、Arduino の LittleFS も
+# PlatformIO の uploadfs も、既定でラベル "spiffs" のパーティションを探す。
+# littlefs という名前にすると esp_littlefs が partition not found で落ちる（実機で確認）。
+spiffs,     data, spiffs,   0x410000, 0xBF0000
