@@ -41,3 +41,11 @@ if (TEST == "base_shrink")
 // 本体と背の高い部品
 if (TEST == "base_parts")
   intersection() { base(); parts(); }
+
+/* 基板を受ける柱が 4 本とも在るか。下穴(φ2.1)と柱(φ4.8)の間を突く。 */
+if (TEST == "standoffs")
+  intersection() {
+    base();
+    for (x = [HOLE_IN, PCB_X - HOLE_IN], y = [HOLE_IN, PCB_Y - HOLE_IN])
+      translate([px(x) + 1.7, py(y), FLOOR + STANDOFF/2]) sphere(d = 0.8);
+  }
