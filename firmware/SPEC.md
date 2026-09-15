@@ -16,17 +16,39 @@
 
 ## 1. 全体の構成
 
-```
-  Mac                        基板（ESP32-S3）                車両
- ┌──────────────┐  BLE NUS  ┌──────────────────────┐  K-Line  ┌────────┐
- │ klconsole.py │◄─────────►│ コマンド解釈          │◄────────►│ ECU    │
- │ klwatch.py   │  文字列   │  ├ 標準 OBD 層        │ 10400bps │ (0x10) │
- │ kllog.py     │           │  ├ 独自層             │  半二重  └────────┘
- │ klota.py     │  WiFi OTA │  ├ 実時間ストリーム   │
- └──────────────┘◄─────────►│  └ 記録 → LittleFS    │
-       ▲                     └──────────────────────┘
-       │ base64+CRC32
-  kldecode.py ← 生バイトの解釈は**全部こちら側**
+```mermaid
+flowchart LR
+  subgraph mac["Mac"]
+    kc["klconsole.py<br/>対話"]
+    kw["klwatch.py<br/>実時間監視"]
+    klg["kllog.py<br/>吸い出し"]
+    ko["klota.py<br/>焼く"]
+    kd["kldecode.py<br/>生バイトの解釈"]
+  end
+  subgraph brd["基板 ESP32-S3"]
+    cmd["コマンド解釈"]
+    obd["標準 OBD 層"]
+    prop["独自層"]
+    pol["実時間ストリーム poll"]
+    rc["記録"]
+    fs[("LittleFS<br/>12224KB")]
+  end
+  ecu["車両 ECU<br/>アドレス 0x10"]
+  kc <-->|"BLE NUS 文字列"| cmd
+  kw <-->|"BLE NUS の P 行"| cmd
+  klg <-->|"base64 ＋ CRC32"| cmd
+  ko <-->|"WiFi OTA"| cmd
+  cmd --> obd
+  cmd --> prop
+  cmd --> pol
+  pol --> prop
+  obd <-->|"K-Line 10400bps 単線半二重"| ecu
+  prop <--> ecu
+  obd --> rc
+  prop --> rc
+  rc --> fs
+  fs -.-> |"get"| klg
+  klg --> kd
 ```
 
 **方針は一つだけ。** 基板は**解釈しない**。生バイトを通し、生バイトを記録する。
@@ -77,15 +99,25 @@ K を 12V に吊っているので、K が開放端なら TX→K→RX が閉じ�
 
 ### `xfer()` —— 全通信の土台
 
-```
-1. 受信バッファを空にする
-2. 要求を T_REQ として記録する       ← 何を訊いたかが対で残る
-3. 送信して flush
-4. エコーを n バイト読み、要求と一致するか数える（上限 400ms）
-5. 応答を読む
-     lenAt2 = true  … 2 バイト目が総バイト数。そこまで読んだら確定（独自層）
-     lenAt2 = false … 静かになるまで読む（標準層。長さが前置されない）
-6. 応答を T_PROP / T_OBD として記録する
+```mermaid
+sequenceDiagram
+  participant B as 基板
+  participant K as K ライン
+  participant E as ECU
+  B->>B: 受信バッファを空にする
+  B->>B: 要求を T_REQ として記録<br/>何を訊いたかが対で残る
+  B->>K: 要求を送信して flush
+  K-->>B: エコー<br/>単線半二重なので送信波形がそのまま戻る
+  B->>B: 要求と一致するか数える<br/>上限 400ms・一致数と誤り数を保持
+  K->>E: 要求
+  E->>K: 応答
+  K-->>B: 応答
+  alt lenAt2 = true（独自層）
+    B->>B: 2 バイト目が総バイト数。そこまで読んで確定
+  else lenAt2 = false（標準層）
+    B->>B: 長さが前置されないので静かになるまで読む
+  end
+  B->>B: 応答を T_PROP / T_OBD として記録
 ```
 
 戻り値は受信長、`-2` は長さバイトが範囲外。**タイムアウトは呼び出し側が渡す。**
@@ -127,6 +159,19 @@ ISO 14230-4 KWP FAST。**ELM327 で既に取れているものの再現で、足
 
 `w` は **A → B の順に自動で両方試し**、初期化に応答した方で止まって
 keep-alive を入れる。両方無応答なら報告して終わる。
+
+```mermaid
+flowchart TD
+  s(["w"]) --> br1["70ms Low → 120ms High"]
+  br1 --> wa["ウェイクアップ A<br/>FE 04 72 8C ・ CRF250L 系"]
+  wa --> ia["初期化 72 05 00 F0 99"]
+  ia -->|"応答あり"| ok["keep-alive を入れて終了<br/>テーブル 0x00 を 2 秒周期"]
+  ia -->|"無応答"| br2["70ms Low → 120ms High"]
+  br2 --> wb["ウェイクアップ B<br/>FE 04 FF FF ・ CBR600RR 系"]
+  wb --> ib["初期化 72 05 00 F0 99"]
+  ib -->|"応答あり"| ok
+  ib -->|"無応答"| ng["両方とも応答なし<br/>brk / X / baud で手探りへ"]
+```
 
 `s` は `0x00`〜`0xFF` を総当たりし、応答したものだけを表示する（各 200ms 待ち、
 間に 25ms）。**MC52 で最初にやること。** 何が実在するか分からない状態では、
@@ -183,9 +228,17 @@ P <経過ms> <TT> -            無応答
 
 ### ファイル形式
 
-```
-先頭       "MC52"  ver:u8(=1)  開始壁時計:u32(unix, LE)        … 9 バイト
-レコード   type:u8  dt:u16(LE, 前レコードからの ms)  len:u8  data[len]
+```mermaid
+flowchart LR
+  subgraph hd["先頭 ・ 9 バイト ・ 1 回だけ"]
+    direction LR
+    h1["'MC52'<br/>4B"] --- h2["ver u8<br/>= 1"] --- h3["開始壁時計<br/>u32 LE unix"]
+  end
+  subgraph rc["レコード ・ 4+len バイト ・ 繰り返し"]
+    direction LR
+    r1["type u8"] --- r2["dt u16 LE<br/>前レコードからの ms<br/>65535 で飽和"] --- r3["len u8<br/>255 まで"] --- r4["data[len]<br/>生バイト"]
+  end
+  hd --> rc
 ```
 
 | type | 意味 |
@@ -271,6 +324,24 @@ ota off                 無効化して WiFi を切る
 
 IG 連動なのでキーを切るたびにブートする。**ここを取り違えると記録が取れない。**
 
+```mermaid
+flowchart TB
+  ig["キーオフ = 瞬断<br/>IG 連動なので電源が切れる"]
+  subgraph keep["再起動で残る"]
+    nvs["NVS<br/>WiFi 資格情報<br/>wifi clear まで"]
+    lfs["LittleFS<br/>ログファイル<br/>rm まで"]
+  end
+  subgraph lose["再起動で消える ・ 全部 RAM"]
+    r["rec の入切 → 切<br/>記録は自動再開しない"]
+    pl["poll の設定 → 停止"]
+    ka["keep-alive → 切"]
+    ot["OTA → 切"]
+    ck["壁時計 → 未設定"]
+  end
+  ig --> lose
+  ig -.->|"影響しない"| keep
+```
+
 | 状態 | 寿命 |
 |---|---|
 | WiFi 資格情報 | **NVS に残る**（`wifi clear` まで） |
@@ -283,6 +354,24 @@ IG 連動なのでキーを切るたびにブートする。**ここを取り違
 
 **帰結: エンジン始動 → BLE 接続 → `rec on` の順で固定。** 逆順だと始動時の
 ブートで記録が消える。
+
+```mermaid
+sequenceDiagram
+  actor R as 自分
+  participant B as 基板
+  participant M as Mac
+  R->>B: キーオン
+  Note over B: ブート。壁時計なし・rec 切・poll 停止
+  R->>B: エンジン始動
+  Note over B: クランキングで 10.2V まで落ちるが 3.3V は保つ
+  M->>B: BLE 接続
+  Note over M,B: 壁時計が自動で入る
+  M->>B: rec on
+  Note over B: ここから記録。poll と併用すれば生バイトが両方に残る
+  M->>B: rec off
+  R->>B: キーオフ
+  Note over B: rec off を打てないまま切れると末尾 5 秒を失う
+```
 
 ## 11. 実測値
 
