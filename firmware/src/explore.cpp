@@ -24,6 +24,9 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <time.h>
+#include <WiFi.h>
+#include <ArduinoOTA.h>
+#include <Preferences.h>
 
 static const int PIN_KL_TX = 17;
 static const int PIN_KL_RX = 18;
@@ -86,12 +89,22 @@ static void klBreak(uint32_t lowMs, uint32_t highMs) {
 
 /* 送信 → 半二重のエコーを捨てる → 応答を受ける。
  * `lenAt2` = 2 バイト目が総バイト数（独自層）。false なら長さを見ずに静かになるまで読む。 */
+/* **エコーは捨てずに検証する。** K ラインは単線半二重なので送信波形がそのまま
+ * RX に戻る。これが一致するかどうかが、そのまま物理層の健全性の指標になる
+ * （配線の入れ違い、GND や 12V への短絡、L9637D の不調が全部ここに出る）。
+ * 車両の前で「通信が通らない」となったとき、基板側か車両側かを切り分けられる。 */
+static int echoBad = 0, echoGot = 0;
 static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
                 uint32_t wait_ms, bool lenAt2) {
   while (KL.available()) KL.read();
   KL.write(req, n); KL.flush();
   uint32_t t0 = millis();
-  for (size_t i = 0; i < n && millis() - t0 < 400; ) if (KL.available()) { KL.read(); i++; }
+  echoBad = 0; echoGot = 0;
+  for (size_t i = 0; i < n && millis() - t0 < 400; ) {
+    if (!KL.available()) continue;
+    if (KL.read() != req[i]) echoBad++;
+    i++; echoGot++;
+  }
 
   size_t got = 0, need = 0;
   t0 = millis();
@@ -216,6 +229,32 @@ static void cmdTable(uint8_t t) {
 /* 標準 OBD 層。ELM327 で既に取れているものの再現で、**足場**。
  * ここが通れば UART・タイミング・エコー処理が正しいと分かり、独自層が
  * 無反応だったときに「実装が悪いのか MC52 が喋らないのか」を切り分けられる。 */
+/* K ライン折り返し。**車両に繋がずに物理層だけを確かめる。**
+ * 基板の R7（510Ω・VIN→KLINE）が K を 12V に吊っているので、カプラを車両へ
+ * 挿していなければ（＝K 線が開放端なら）TX→K→RX が閉じる。ハーネスを作った
+ * 直後にこれを回せば、入れ違いも短絡も車両の前へ行く前に潰せる。 */
+static void cmdLoop() {
+  out("-- K ライン折り返し（車両に挿していないこと）--\n");
+  klRaw();
+  digitalWrite(PIN_KL_TX, HIGH); delay(5); int hi = digitalRead(PIN_KL_RX);
+  digitalWrite(PIN_KL_TX, LOW);  delay(5); int lo = digitalRead(PIN_KL_RX);
+  digitalWrite(PIN_KL_TX, HIGH); klUart();
+  outf("  DC  TX=H→RX=%d / TX=L→RX=%d  %s\n", hi, lo,
+       (hi == 1 && lo == 0) ? "経路成立"
+     : (hi == lo) ? "**RX が動かない。K が GND か 12V に落ちている疑い**"
+     : "**論理が反転。VBAT と KLINE の入れ違いを疑う**");
+  uint8_t tx[64], r[8];
+  uint32_t seed = 0x12345678;
+  int bad = 0, tot = 0;
+  for (int k = 0; k < 16; k++) {
+    for (int i = 0; i < 64; i++) { seed = seed * 1664525u + 1013904223u; tx[i] = seed >> 24; }
+    xfer(tx, 64, r, sizeof r, 40, false);
+    bad += echoBad + (64 - echoGot); tot += 64;
+  }
+  outf("  %lu bps で %d バイト 誤り %d %s\n", (unsigned long)klBaud, tot, bad,
+       bad ? "← **異常**" : "← 健全");
+}
+
 static void cmdObd() {
   static const uint8_t IN[5] = {0xC1, 0x33, 0xF1, 0x81, 0x66};
   uint8_t r[64];
@@ -235,6 +274,74 @@ static void cmdObd() {
     if (n >= 6 && r[3] == 0x41 && r[4] == 0x0D) outf("  → 車速 %d km/h\n", r[5]);
     delay(60);
   }
+}
+
+/* ── OTA ─────────────────────────────────────────────────
+ * **J3 のジャンパ操作を無くすため。** 探索フェーズは「仮説が外れたら試す」の
+ * 繰り返しで、土台に任意バイト列を置いてもコード側の修正は出る（実際に k の
+ * 抜けが出た）。焼き直しの回数が読めないので OTA を入れる。
+ *
+ * **SSID とパスワードはソースに書かない。** このリポジトリは PUBLIC。
+ * BLE で設定して NVS に置く（`HANDOFF.md` の「設定は BLE 経由」と同じ枠）。
+ * NVS は暗号化されていないので、機密扱いの資格情報は入れないこと。
+ *
+ * **OTA は既定で切。** `ota on` で明示的に有効化し、再起動で戻る。LAN に
+ * 無認証の書き込み口を開き続けない。
+ *
+ * **J3 は最後の逃げ道として残す。** 壊れたファームを飛ばすと BLE も OTA も
+ * 死ぬので、有線の経路を潰してはいけない。 */
+static Preferences prefs;
+static bool otaOn = false;
+
+static void cmdWifi(const char *arg) {
+  if (!*arg) {
+    prefs.begin("mc52", true);
+    String ss = prefs.getString("ssid", "");
+    prefs.end();
+    outf("保存済み SSID: %s\n", ss.length() ? ss.c_str() : "(なし)");
+    return;
+  }
+  char buf[160]; strncpy(buf, arg, sizeof buf - 1); buf[sizeof buf - 1] = 0;
+  char *sp = strchr(buf, ' ');
+  if (!sp) { out("wifi <ssid> <pass>\n"); return; }
+  *sp++ = 0;
+  prefs.begin("mc52", false);
+  prefs.putString("ssid", buf);
+  prefs.putString("pass", sp);
+  prefs.end();
+  outf("保存した SSID=%s（パスワードは表示しない）\n", buf);
+}
+
+static void cmdOta(const char *arg) {
+  if (*arg == '0' || !strncmp(arg, "off", 3)) {
+    if (otaOn) ArduinoOTA.end();
+    WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
+    otaOn = false; out("OTA 切\n"); return;
+  }
+  if (otaOn) { outf("既に有効  IP %s\n", WiFi.localIP().toString().c_str()); return; }
+  prefs.begin("mc52", true);
+  String ss = prefs.getString("ssid", ""), pw = prefs.getString("pass", "");
+  prefs.end();
+  if (!ss.length()) { out("先に wifi <ssid> <pass> で設定する\n"); return; }
+  outf("%s に接続中…\n", ss.c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ss.c_str(), pw.c_str());
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(200);
+  if (WiFi.status() != WL_CONNECTED) { out("接続できない\n"); WiFi.mode(WIFI_OFF); return; }
+  ArduinoOTA.setHostname("mc52-explore");
+  ArduinoOTA.onStart([] { out("OTA 開始\n"); });
+  ArduinoOTA.onEnd([]   { out("OTA 完了。再起動する\n"); });
+  ArduinoOTA.onProgress([](unsigned p, unsigned t) {
+    static int last = -1; int pc = t ? p * 100 / t : 0;
+    if (pc / 20 != last) { last = pc / 20; outf("  %d%%\n", pc); }
+  });
+  ArduinoOTA.onError([](ota_error_t e) { outf("OTA 失敗 %d\n", (int)e); });
+  ArduinoOTA.begin();
+  otaOn = true;
+  String ip = WiFi.localIP().toString();
+  outf("**OTA 有効  IP %s  RSSI %d dBm**\n", ip.c_str(), WiFi.RSSI());
+  outf("  pio run -e explore_ota -t upload --upload-port %s\n", ip.c_str());
 }
 
 // ── コマンド解釈 ─────────────────────────────────────────
@@ -267,6 +374,11 @@ static void help() {
       "  ka <0|1>    keep-alive の入切（既定は w で入る）\n"
       "[標準層] 足場。ELM327 で既に取れているもの\n"
       "  o           fast init して 0C / 0D を読む\n"
+      "[物理層]\n"
+      "  k           K ライン折り返し（車両に挿していない状態で。配線の検証）\n"
+      "[更新] J3 のジャンパ操作を無くす\n"
+      "  wifi <ssid> <pass>  資格情報を NVS に保存（ソースには書かない）\n"
+      "  ota on | off        OTA を有効化して IP を返す（既定は切。再起動で戻る）\n"
       "[その他]\n"
       "  time <unix> 壁時計を合わせる（GPS ログとの突き合わせに要る）\n"
       "  ?           この一覧\n"
@@ -284,6 +396,9 @@ static void runCmd(char *line) {
   if (!strcmp(line, "d")) { cmdTable(0xD1); return; }
   if (!strcmp(line, "m")) { cmdTable(0x11); cmdTable(0x10); return; }
   if (!strcmp(line, "o")) { cmdObd(); return; }
+  if (!strcmp(line, "k")) { cmdLoop(); return; }
+  if (!strcmp(line, "wifi")) { cmdWifi(arg); return; }
+  if (!strcmp(line, "ota")) { cmdOta(arg); return; }
   if (!strcmp(line, "t")) { uint8_t t[1]; if (hexBytes(arg, t, 1) == 1) cmdTable(t[0]); else out("t の後に 16 進 2 桁\n"); return; }
   if (!strcmp(line, "ka")) { keepOn = (*arg == '1'); outf("keep-alive %s\n", keepOn ? "入" : "切"); return; }
   if (!strcmp(line, "baud")) { klBaud = atoi(arg); klUart(); outf("K ライン %lu bps\n", (unsigned long)klBaud); return; }
@@ -304,6 +419,8 @@ static void runCmd(char *line) {
     dump("送信 ", b, n);
     uint8_t r[192];
     int m = xfer(b, n, r, sizeof r, 400, false);
+    outf("エコー %d/%d バイト 誤り %d %s\n", echoGot, n, echoBad,
+         (echoGot == n && !echoBad) ? "← 物理層は健全" : "← **K ラインに異常**");
     if (m <= 0) { out("応答なし\n"); return; }
     dump("応答 ", r, m);
     outf("  総和 0x%02X %s\n", (uint8_t)[&]{ uint8_t s=0; for (int i=0;i<m;i++) s+=r[i]; return s; }(),
@@ -362,6 +479,7 @@ void setup() {
 }
 
 void loop() {
+  if (otaOn) ArduinoOTA.handle();
   keepAlive();
   while (Serial.available()) {
     char ch = Serial.read();

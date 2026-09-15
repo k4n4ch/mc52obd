@@ -109,6 +109,14 @@ async def run(timeout: float, logfile: str | None) -> int:
                 continue
             if not line:
                 continue
+            # **wifi のパスワードは記録に残さない。** !log を有効にしたまま
+            # 資格情報を打つと平文でファイルに落ちるため。
+            if con.log and line.split()[0] == "wifi" and len(line.split()) > 2:
+                con.log.write("> wifi <ssid> <pass>   ← 内容は伏せた\n")
+                con.log.flush()
+            elif con.log:
+                con.log.write(f"> {line}\n")
+                con.log.flush()
             await send(line)
             await asyncio.sleep(0.1)
     return 0
