@@ -100,8 +100,9 @@ async def fetch(cli, ses, name, out_dir):
     except StopIteration:
         print("  ★ 転送が完了しなかった")
         return False
-    size = int(lines[bi].split()[2])
-    want = int(lines[ei].split()[1], 16)
+    # **サイズは末尾から取る。** 名前に空白が入りうるので固定位置では壊れる
+    size = int(lines[bi].split()[-1])
+    want = int(lines[ei].split()[-1], 16)
     blob = base64.b64decode("".join(lines[bi + 1:ei]))
     got = binascii.crc32(blob) & 0xFFFFFFFF
 

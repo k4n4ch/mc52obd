@@ -422,7 +422,16 @@ static void logRec(uint8_t type, const uint8_t *d, size_t n) {
 }
 static void logTick() { if (recOn && millis() - lastFlush > 5000) logFlush(); }
 
-static void cmdRec(const char *arg) {
+static void cmdRec(const char *argIn) {
+  /* `rec on <名前>` の `on` を名前として食っていた（実機で `on bench.bin` が
+   * 出来た）。先頭の語を見てから残りを名前にする。名前に空白は許さない —— 
+   * 転送の BEGIN 行が空白区切りなので、名前に入ると解析が壊れる。 */
+  char tmp[64]; strncpy(tmp, argIn, sizeof tmp - 1); tmp[sizeof tmp - 1] = 0;
+  char *arg = tmp;
+  if (!strncmp(arg, "on", 2) && (arg[2] == 0 || arg[2] == ' ')) {
+    arg += 2; while (*arg == ' ') arg++;
+  }
+  for (char *p = arg; *p; p++) if (*p == ' ') *p = '_';
   if (!strncmp(arg, "off", 3) || *arg == '0') {
     if (!recOn) { out("記録していない\n"); return; }
     logFlush(); logFile.close(); recOn = false;
