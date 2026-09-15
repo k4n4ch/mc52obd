@@ -74,10 +74,20 @@ async def run(args):
         t0 = time.monotonic()
         n = 0
         miss = 0
+        # ── 空転を止める ────────────────────────────────────
+        # **周期を決めているのは ELM327 の応答時間だけだった。** 正常時は
+        # 1 周期 730ms だが、全 PID が即座に NO DATA を返すと待ち時間が消えて
+        # ループが空転する。実測で有効 161 行に対し 1250 万行・1.17GB を書いた
+        # （2026-08-30、既知の不具合 7）。1 周期 0.3ms まで速くなっていた。
+        CYCLE_MIN = 0.05          # どんな理由で速くなっても割らない床
+        IDLE_MIN, IDLE_MAX = 0.25, 2.0   # 全滅した周期の後に待つ時間
+        idle_wait = IDLE_MIN
+        silent_since = None
         with path.open("w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(cols)
             while time.monotonic() - t0 < args.sec:
+                cyc0 = time.monotonic()
                 # 速い信号は毎周期、遅い信号は 1 周期に 1 個ずつ持ち回り
                 this_cycle = list(fast)
                 if slow:
@@ -116,6 +126,25 @@ async def run(args):
                 )
                 fh.flush()
                 n += 1
+
+                # **1 つでも取れたら通常、全滅ならバックオフ。**
+                # 黙った ECU を全速で叩き続ける意味が無い。
+                if vals:
+                    idle_wait = IDLE_MIN
+                    silent_since = None
+                else:
+                    if silent_since is None:
+                        silent_since = cyc0
+                    await asyncio.sleep(idle_wait)
+                    idle_wait = min(idle_wait * 2, IDLE_MAX)
+                    if args.silent_max and time.monotonic() - silent_since > args.silent_max:
+                        print(f"\n[!] ECU が {args.silent_max:.0f} 秒間まったく応答しない。打ち切る",
+                              flush=True)
+                        break
+                # 周期の床。正常時（1 周期 730ms）には効かない
+                rest = CYCLE_MIN - (time.monotonic() - cyc0)
+                if rest > 0:
+                    await asyncio.sleep(rest)
                 if n % 20 == 0:
                     print(f"  t={t:6.1f}s n={n:4d} rpm={vals.get(0x0C,'?')} "
                           f"tps={vals.get(0x11,'?')} map={vals.get(0x0B,'?')}",
@@ -137,6 +166,8 @@ def main():
     ap.add_argument("--sec", type=float, default=120.0, help="記録時間 [s]")
     ap.add_argument("--fast", default=FAST_PIDS, help="毎周期読む PID (hex, カンマ区切り)")
     ap.add_argument("--slow", default=SLOW_PIDS, help="持ち回りで読む PID")
+    ap.add_argument("--silent-max", type=float, default=60.0,
+                    help="ECU が黙り続けたら打ち切るまでの秒数（0 で無効）")
     ap.add_argument("--st", type=lambda x: int(x, 16), default=0x14,
                     help="ATST の値 (hex, 4ms 単位。既定 14=80ms)")
     args = ap.parse_args()
