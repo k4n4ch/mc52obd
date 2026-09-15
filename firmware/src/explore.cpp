@@ -234,6 +234,93 @@ static void cmdTable(uint8_t t) {
   if (t == 0x10 || t == 0x11 || t == 0x61) showSensors(r, n);
 }
 
+// 16 進の切り出しは下で定義するが、poll の引数解釈で使うので前方宣言する
+static int hexBytes(const char *s, uint8_t *b, size_t cap);
+
+/* ── 実時間ストリーム ─────────────────────────────────────
+ * **生バイトをそのまま押し出す。解釈しない。**
+ *
+ * バイト同定に必要なのはスナップショットではなく時系列。クラッチを握る瞬間や
+ * スロットルを煽った瞬間に**どのバイトが動くか**を見る計器が要る。`d` や `m` の
+ * 連打では取れない。
+ *
+ * 解釈を含まないので、先行事例のインデックスが MC52 で外れていてもこの層は
+ * 間違いにならず、実用フェーズの送信経路としてそのまま使える。
+ *
+ * 行形式は機械可読に固定する（人向けの日本語出力とは混ぜない）。
+ *
+ *   P <経過ms> <TT> <hex..>     応答
+ *   P <経過ms> <TT> -           無応答
+ *
+ * 律速は K ライン 10400bps。要求 5B ＋ 応答 30B ＋ ECU の間で 1 テーブル
+ * 60〜85ms、3 本で 4〜5Hz が天井。周期が足りなければ詰めずに回す。
+ *
+ * **BLE が切れても止めない。** 走行中はスマホ非接続で `rec` の記録だけが走る。
+ * `xfer()` が要求と応答を両方 logRec するので、記録側の改造は要らない。 */
+static uint8_t pollTbl[8];
+static int pollN = 0;
+static uint32_t pollMs = 200, pollLast = 0, pollT0 = 0, pollCycles = 0;
+
+static void pollTick() {
+  if (!pollN || millis() - pollLast < pollMs) return;
+  pollLast = millis();                 // 周期はサイクル開始基準（間隔ではなくレート）
+  uint8_t r[160];
+  char line[600];
+  for (int i = 0; i < pollN; i++) {
+    int n = readTable(pollTbl[i], r, sizeof r, 200);
+    int p = snprintf(line, sizeof line, "P %lu %02X",
+                     (unsigned long)(millis() - pollT0), pollTbl[i]);
+    if (n <= 0) p += snprintf(line + p, sizeof line - p, " -");
+    else for (int k = 0; k < n && p < (int)sizeof line - 4; k++)
+      p += snprintf(line + p, sizeof line - p, " %02X", r[k]);
+    snprintf(line + p, sizeof line - p, "\n");
+    out(line);
+  }
+  pollCycles++;
+  lastKeep = millis();   // 通信自体がセッションを維持する。keep-alive は要らない
+}
+
+static void cmdPoll(char *arg) {
+  if (!strncmp(arg, "off", 3)) {
+    if (!pollN) { out("停止中\n"); return; }
+    outf("停止（%lu 周期 / %lu 秒）\n", (unsigned long)pollCycles,
+         (unsigned long)((millis() - pollT0) / 1000));
+    pollN = 0;
+    return;
+  }
+  if (!*arg) {
+    if (!pollN) { out("停止中。poll <テーブル..> [周期ms]   例: poll D1 11 200\n"); return; }
+    char b[128]; int p = snprintf(b, sizeof b, "%lu ms 周期で", (unsigned long)pollMs);
+    for (int i = 0; i < pollN; i++) p += snprintf(b + p, sizeof b - p, " %02X", pollTbl[i]);
+    outf("%s（%lu 周期）\n", b, (unsigned long)pollCycles);
+    return;
+  }
+  /* **2 桁までをテーブル、3 桁以上を周期 ms と解釈する。** hexBytes は非 16 進を
+   * 読み飛ばすので "D1 11 200" を D1 11 20 00 と読んでしまう。ここは自前で切る。 */
+  uint8_t tb[8]; int tn = 0; uint32_t iv = pollMs;
+  for (char *s = arg; *s; ) {
+    while (*s == ' ') s++;
+    if (!*s) break;
+    char *e = s; while (*e && *e != ' ') e++;
+    char tok[16]; size_t len = (size_t)(e - s);
+    if (len > sizeof tok - 1) len = sizeof tok - 1;
+    memcpy(tok, s, len); tok[len] = 0;
+    if (len <= 2) { uint8_t v; if (hexBytes(tok, &v, 1) == 1 && tn < 8) tb[tn++] = v; }
+    else iv = strtoul(tok, nullptr, 10);
+    s = e;
+  }
+  if (!tn) { out("テーブルを 16 進 2 桁で。例: poll D1 11 200\n"); return; }
+  if (iv < 20) iv = 20;
+  if (iv > 60000) iv = 60000;
+  memcpy(pollTbl, tb, tn); pollN = tn; pollMs = iv;
+  pollT0 = pollLast = millis(); pollCycles = 0;
+  char b[128]; int p = 0;
+  for (int i = 0; i < tn; i++) p += snprintf(b + p, sizeof b - p, " %02X", tb[i]);
+  outf("開始:%s を %lu ms 周期（1 テーブル 60〜85ms なので %d 本だと実効 %lu ms 程度）\n",
+       b, (unsigned long)iv, tn, (unsigned long)(iv > (uint32_t)tn * 75 ? iv : (uint32_t)tn * 75));
+  if (!keepOn) out("※ `w` で独自層を起こしていない。無応答が続くなら先に w\n");
+}
+
 /* 標準 OBD 層。ELM327 で既に取れているものの再現で、**足場**。
  * ここが通れば UART・タイミング・エコー処理が正しいと分かり、独自層が
  * 無反応だったときに「実装が悪いのか MC52 が喋らないのか」を切り分けられる。 */
@@ -538,6 +625,10 @@ static void help() {
       "  m           0x11 → 0x10（センサ群。index18-19 が噴射時間か）\n"
       "  t <XX>      任意のテーブルを 1 回読む\n"
       "  ka <0|1>    keep-alive の入切（既定は w で入る）\n"
+      "[実時間] 生バイトを機械可読な行で押し出す。解釈は Mac 側（klwatch.py）\n"
+      "  poll <TT..> [ms]    そのテーブルを周期読みして P 行で流す（既定 200ms）\n"
+      "                      BLE が切れても止まらない。rec と併用すると記録も残る\n"
+      "  poll off            停止   poll だけで現在の状態\n"
       "[標準層] 足場。ELM327 で既に取れているもの\n"
       "  o           fast init して 0C / 0D を読む\n"
       "[物理層]\n"
@@ -568,6 +659,7 @@ static void runCmd(char *line) {
   if (!strcmp(line, "s")) { cmdScan(); return; }
   if (!strcmp(line, "d")) { cmdTable(0xD1); return; }
   if (!strcmp(line, "m")) { cmdTable(0x11); cmdTable(0x10); return; }
+  if (!strcmp(line, "poll")) { cmdPoll(arg); return; }
   if (!strcmp(line, "o")) { cmdObd(); return; }
   if (!strcmp(line, "k")) { cmdLoop(); return; }
   if (!strcmp(line, "rec")) { cmdRec(arg); return; }
@@ -668,6 +760,7 @@ void setup() {
 void loop() {
   if (otaOn) ArduinoOTA.handle();
   logTick();
+  pollTick();
   keepAlive();
   while (Serial.available()) {
     char ch = Serial.read();
