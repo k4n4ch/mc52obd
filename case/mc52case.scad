@@ -1,16 +1,28 @@
 /* MC52 基板のケース（PETG で 3D プリント）
  *
- * 基板は ../hardware/。50 × 40mm、取付穴 φ2.8（M2.5）が各辺から 3.5mm。
- * **探索＋記録フェーズ用の窓なし密閉箱。** 表示器が未決なので窓は付けない。
+ * 基板は ../hardware/。50 × 40mm、取付穴 φ2.8 が各辺から 3.5mm。
+ * **探索＋記録フェーズ用の窓なし箱。** 表示器が未決なので窓は付けない。
  *
  * ── 実測（2026-09-15）────────────────────────────────────
- *   C2（電解）の高さ      8mm
- *   J1 の熱収縮まで      12mm   ← **これが内寸を支配する**
- *   線が曲がり始める     20mm
- *   シースの下端         33mm   外径 6mm
+ *   C2（電解）8mm / J1 の熱収縮 12mm / 線の曲がり始め 20mm / シース下端 33mm・外径 6mm
  *
- * **蓋の J1 直上から線を真っ直ぐ抜く。** ケース内で曲げようとすると内寸 22mm
- * 以上になるが、外で曲げれば 13mm で済む（外形で 9mm 低い）。
+ * **J1 の 12mm が内寸を支配する。** 線は蓋から真っ直ぐ抜いて外で曲げる
+ * （中で曲げると内寸 22mm 以上になる）。
+ *
+ * ── 固定の考え方 ─────────────────────────────────────────
+ * **ネジ 1 組で蓋・基板・本体をまとめて締める。**
+ *
+ *   蓋の柱（上から 13mm 降りる）→ 基板の取付穴（素通し）→ 本体の柱にタッピング
+ *
+ * 基板が上下の柱に挟まれるので、基板専用のネジが要らない。**蓋の固定点を基板の
+ * 外へ出す必要も無く、外形は基板＋壁だけで済む。**
+ *
+ * **M2 を使う。** M2.5 の六角穴は逃げ半径 2.25mm を要求するが、取付穴から最寄り
+ * 部品までは 左上 2.55 / 左下 2.72 / 右上 2.96 / 右下 7.67mm しかない
+ * （hardware/README.md）。φ4.0 の柱（半径 2.0）なら 4 隅とも 0.55mm 以上空く。
+ *
+ * **蓋の柱は左下だけ省く。** そこは J1 の線が出る角で、ケーブルの U 溝と 0.2mm
+ * 食い合う。3 点で十分留まるし、基板はその角も本体の柱に載る。
  */
 
 // ── 基板 ─────────────────────────────────────────────────
@@ -22,43 +34,38 @@ H_J1 = 12.0;   // 熱収縮の頂点。内寸を支配する
 H_C2 = 8.0;
 
 // ── ケース ───────────────────────────────────────────────
-WALL  = 2.0;   // 0.4mm ノズルで 5 周。強度も気密も足りる
+WALL  = 2.0;   // 0.4mm ノズルで 5 周
 FLOOR = 2.5;   // タイラップ溝を彫っても 1.5mm 残る
 LIDT  = 2.5;
 CLR   = 0.4;   // 基板と内壁の片側隙間
 STANDOFF = 3.0;   // 基板下の逃げ。J1 のピンが裏へ突き出る
 HEAD     = 1.0;   // J1 頂点と蓋裏の隙間
 
-/* 基板を受ける柱の径。**φ5.8 だと J1 の線と 0.17mm 干渉する。**
- * 取付穴 (3.5,3.5) から J1 の 1 番ピン (2.54,7.62) まで 4.23mm しかなく、
- * 熱収縮の半径を 1.5mm と見ると柱の半径は 2.7mm 未満でなければならない。
- * hardware/README.md の「M2.5 の頭でも余裕 0.30mm」と同じ制約。 */
-BOSS_D = HOLE_D + 2.0;   // = 4.8。半径 2.4 + 1.5 = 3.9 < 4.23（余裕 0.33mm）
+// M2。柱 φ4.0 / 下穴 φ1.6（肉厚 1.2mm）/ 素通し φ2.2 / 皿 φ3.8
+SCREW_PIL = 1.6; SCREW_CLR = 2.2; SCREW_HEAD = 3.8;
+POST_D = 4.0;                // 蓋の柱。半径 2.0 < 最寄り部品 2.55mm
+BOSS_D = HOLE_D + 2.0;       // 本体の柱 = 4.8
 
 INNER_X = PCB_X + 2*CLR;
 INNER_Y = PCB_Y + 2*CLR;
 INNER_Z = STANDOFF + PCB_T + H_J1 + HEAD;
+CASE_X  = INNER_X + 2*WALL;
+CASE_Y  = INNER_Y + 2*WALL;
 
-/* 蓋ネジ。**四隅の局所的な耳にする。**
- * 柱を外殻に含めると外周が全部その直径ぶん埋まり、片側 7mm の肉になって無駄。
- * 耳の中心をキャビティの角から対角に LUG_OFF 出すとき、半径 2.5mm の柱が
- * キャビティへ食い込まない条件は LUG_OFF × √2 ≥ 2.5、すなわち 1.77mm 以上。 */
-SCREW_D = 2.5; SCREW_PIL = 2.1; LUG = 5.0;
-LUG_OFF = 2.0;              // 2.0 × √2 = 2.83 > 2.5 ✓
-EAR = LUG_OFF + LUG/2;      // 角だけ張り出す量 = 4.5
-
-CASE_X = INNER_X + 2*WALL;
-CASE_Y = INNER_Y + 2*WALL;
+PCB_TOP = FLOOR + STANDOFF + PCB_T;   // 基板上面
+LID_Z   = FLOOR + INNER_Z;            // 蓋の裏
+POST_H  = LID_Z - PCB_TOP;            // 蓋の柱の長さ = 13.0
 
 /* ケーブル出口。**縁まで開いた U 溝。**
- * 閉じた長穴だと蓋が入らない —— 線は既に J1 へハンダ付け済みで、蓋を上から
- * 通すにはケーブルの反対端（4 ピンカプラ）を長穴に通す必要があるが、通らない。
- * 溝は線が一列に並んでいる x 方向へ抜く（幅 4.6mm で済み、y 方向より開口が小さい）。 */
-CBL_W = 8.4; CBL_L = 4.6; CBL_BOSS = 6.0; CBL_WALL = 2.0;
+ * 閉じた長穴だと蓋が入らない —— 線は既に J1 へハンダ付け済みで、蓋を上から通すには
+ * ケーブルの反対端（4 ピンカプラ）を長穴に通す必要があるが、通らない。
+ * 溝は線が一列に並んでいる x 方向へ抜く（幅で済み、y 方向より開口が小さい）。
+ * **樋は付けない。** シリコンを塗らない方針になったので充填の深さが要らず、
+ * 付けると蓋の柱と反対を向いて印刷でサポートが要る。 */
+CBL_W = 8.4; CBL_L = 4.6;
 
-/* タイラップ。**溝にして底を貫かない。** 壁が 2.0mm しかないのでトンネルを
- * 掘るとキャビティへ抜ける。ケースの外周を一周させ、帯が滑らないよう底と蓋の
- * 両方に溝を彫る。締めた帯が蓋を押さえる働きも兼ねる。 */
+/* タイラップ。**溝にして底を貫かない。** 壁が 2.0mm しかないのでトンネルは抜ける。
+ * ケースの外周を一周させ、底と蓋の両方に溝を彫る。締めた帯が蓋を押さえる働きも兼ねる。 */
 TIE_W = 5.0; TIE_D = 1.0;
 
 $fn = 48;
@@ -71,72 +78,65 @@ CBL_CY = py(J1_Y);
 module rrect(x, y, z, r) {
   hull() for (a = [r, x - r], b = [r, y - r]) translate([a, b, 0]) cylinder(r = r, h = z);
 }
+// 取付穴 4 箇所（本体の柱）
 module hole_positions() {
   for (x = [HOLE_IN, PCB_X - HOLE_IN], y = [HOLE_IN, PCB_Y - HOLE_IN])
     translate([px(x), py(y), 0]) children();
 }
-module lug_positions() {
-  for (x = [-LUG_OFF, INNER_X + LUG_OFF], y = [-LUG_OFF, INNER_Y + LUG_OFF])
-    translate([x, y, 0]) children();
+// 蓋の柱 3 箇所（左下 = ケーブルが出る角を省く）
+module post_positions() {
+  for (p = [[PCB_X - HOLE_IN, HOLE_IN], [HOLE_IN, PCB_Y - HOLE_IN], [PCB_X - HOLE_IN, PCB_Y - HOLE_IN]])
+    translate([px(p[0]), py(p[1]), 0]) children();
 }
 module tie_cut(z) {
   for (y = [INNER_Y*0.28, INNER_Y*0.72])
-    translate([-WALL - EAR - 1, y - TIE_W/2, z]) cube([CASE_X + 2*EAR + 2, TIE_W, TIE_D + 0.02]);
+    translate([-WALL - 1, y - TIE_W/2, z]) cube([CASE_X + 2, TIE_W, TIE_D + 0.02]);
 }
 
 // ── 本体 ─────────────────────────────────────────────────
 module base() {
   difference() {
-    union() {
-      translate([-WALL, -WALL, 0]) rrect(CASE_X, CASE_Y, FLOOR + INNER_Z, 2.0);
-      lug_positions() cylinder(d = LUG, h = FLOOR + INNER_Z);          // 四隅の耳
-    }
-    translate([0, 0, FLOOR]) cube([INNER_X, INNER_Y, INNER_Z + 1]);    // キャビティ
-    lug_positions() translate([0, 0, FLOOR + INNER_Z - 8]) cylinder(d = SCREW_PIL, h = 9);
-    tie_cut(-0.01);                                                    // 底のタイラップ溝
+    translate([-WALL, -WALL, 0]) rrect(CASE_X, CASE_Y, FLOOR + INNER_Z, 2.0);
+    translate([0, 0, FLOOR]) cube([INNER_X, INNER_Y, INNER_Z + 1]);   // キャビティ
+    tie_cut(-0.01);
   }
   /* **基板を受ける柱はキャビティを彫った後に足す。**
    * difference の中で union すると、キャビティの立方体が柱ごと削ってしまう。 */
   difference() {
     hole_positions() cylinder(d = BOSS_D, h = FLOOR + STANDOFF);
-    hole_positions() translate([0, 0, FLOOR]) cylinder(d = SCREW_PIL, h = STANDOFF + 1);
+    hole_positions() translate([0, 0, FLOOR - 1]) cylinder(d = SCREW_PIL, h = STANDOFF + 2);
   }
 }
 
-// ── 蓋 ───────────────────────────────────────────────────
+// ── 蓋（z=0 が外面。組み立て時は裏返して LID_Z へ）──────────
 module lid() {
   LIP_T = 1.5;
   difference() {
     union() {
       translate([-WALL, -WALL, 0]) rrect(CASE_X, CASE_Y, LIDT, 2.0);
-      lug_positions() cylinder(d = LUG, h = LIDT);
-      /* 内側に落ちる縁。蓋を位置決めし、合わせ面のシリコンに迷路を作る。
-       * **枠にすること。** 中実にすると基板上面より下へ降りて J1 の熱収縮に当たる。 */
+      /* 内側に落ちる縁。蓋を位置決めする。**枠にすること。**
+       * 中実にすると基板上面より下へ降りて J1 の熱収縮に当たる。 */
       translate([0.3, 0.3, -1.2]) difference() {
         cube([INNER_X - 0.6, INNER_Y - 0.6, 1.2]);
         translate([LIP_T, LIP_T, -0.5])
           cube([INNER_X - 0.6 - 2*LIP_T, INNER_Y - 0.6 - 2*LIP_T, 2.2]);
       }
-      // ケーブルの樋。端は外形と面一にする（はみ出すと引っ掛かる）
-      translate([0, CBL_CY, LIDT])
-        hull() for (x = [CBL_CX + (CBL_W - CBL_L)/2, -WALL + (CBL_L + 2*CBL_WALL)/2])
-          translate([x, 0, 0]) cylinder(d = CBL_L + 2*CBL_WALL, h = CBL_BOSS);
+      // 基板まで降りる柱
+      post_positions() translate([0, 0, -POST_H]) cylinder(d = POST_D, h = POST_H);
     }
-    // U 溝（樋・縁ごと貫通し、-x の縁まで開く）
-    translate([0, CBL_CY, -2])
-      hull() for (x = [CBL_CX + (CBL_W - CBL_L)/2, -WALL - EAR - 2])
-        translate([x, 0, 0]) cylinder(d = CBL_L, h = LIDT + CBL_BOSS + 4);
-    // 蓋のネジ穴（頭を落とす）
-    lug_positions() {
-      translate([0, 0, -1]) cylinder(d = SCREW_D + 0.4, h = LIDT + 2);
-      translate([0, 0, LIDT - 1.4]) cylinder(d = SCREW_D + 2.6, h = 2);
+    // U 溝（縁ごと貫通し、-x の縁まで開く）
+    translate([0, CBL_CY, -POST_H - 2])
+      hull() for (x = [CBL_CX + (CBL_W - CBL_L)/2, -WALL - 2])
+        translate([x, 0, 0]) cylinder(d = CBL_L, h = POST_H + LIDT + 4);
+    // ネジ（素通し＋皿）
+    post_positions() {
+      translate([0, 0, -POST_H - 1]) cylinder(d = SCREW_CLR, h = POST_H + LIDT + 2);
+      translate([0, 0, LIDT - 1.2]) cylinder(d = SCREW_HEAD, h = 2);
     }
-    // 縁が基板の取付穴の柱と当たらないよう逃がす
-    hole_positions() translate([0, 0, -1.6]) cylinder(d = HOLE_D + 4.0, h = 2.0);
-    tie_cut(LIDT - TIE_D);                                             // 上面のタイラップ溝
+    tie_cut(LIDT - TIE_D);
   }
 }
 
 PART = "both";
 if (PART == "base" || PART == "both") base();
-if (PART == "lid"  || PART == "both") translate([0, CASE_Y + 2*EAR + 6, 0]) lid();
+if (PART == "lid"  || PART == "both") translate([0, CASE_Y + 6, 0]) lid();

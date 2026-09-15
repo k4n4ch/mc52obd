@@ -1,51 +1,44 @@
-/* 干渉検査。**目視ではなく交差を取って確かめる。**
- * 線・熱収縮・部品を円柱と直方体でモデル化し、ケースとの交差が空かを見る。
- * 空でなければ OpenSCAD が「top level object is empty」を出さないので分かる。
+/* ケースの干渉検査。**目視ではなく交差を取って確かめる。**
+ * レンダは当てにならない（柱が壁に溶けて数え間違えた実績がある）。
  *
- *   openscad -D 'TEST="lid_wire"' -o /tmp/t.stl check.scad
+ *   for t in lid_wire lid_shrink lid_parts base_parts standoffs post_slot; do
+ *     openscad -D 'PART="none"' -D "TEST=\"$t\"" -o /tmp/t.stl check.scad
+ *   done
+ *
+ * 「empty」が出れば干渉なし。**寸法を変えたら必ず回す。**
  */
 include <mc52case.scad>;
+include <parts.scad>;      // genparts.py が製造データから生成
 
-PCB_TOP = FLOOR + STANDOFF + PCB_T;   // 6.6
-LID_Z   = FLOOR + INNER_Z;            // 19.6（蓋の裏）
-
-W_D     = 2.5;    // 線の外径（余裕込み）
-S_D     = 3.2;    // 熱収縮の外径
-S_H     = 12.0;   // 熱収縮の頂点（基板面から）
+W_D = 2.5;    // 線の外径（余裕込み）
+S_D = 3.2;    // 熱収縮の外径
+S_H = 12.0;   // 熱収縮の頂点（基板面から）
 
 module wires(d, h0, h1) {
   for (i = [0, 1, 2])
-    translate([px(J1_X + i*J1_PITCH), py(J1_Y), PCB_TOP + h0])
-      cylinder(d = d, h = h1 - h0);
+    translate([px(J1_X + i*J1_PITCH), py(J1_Y), PCB_TOP + h0]) cylinder(d = d, h = h1 - h0);
 }
-// 背の高い部品
-module parts() {
-  translate([px(15.82) - 3.5, py(13.21) - 3.5, PCB_TOP]) cube([7, 7, H_C2]);      // C2
-  translate([px(34.04) - 9.5, py(23.37) - 13, PCB_TOP])  cube([19, 26, 3.1]);     // U2
-}
+module lid_placed() { translate([0, 0, LID_Z]) lid(); }
 
-TEST = "all";
+TEST = "none";
 
-// 蓋（組み立て位置）と線
-if (TEST == "lid_wire")
-  intersection() { translate([0,0,LID_Z]) lid(); wires(W_D, 0, 40); }
-// 蓋と熱収縮
-if (TEST == "lid_shrink")
-  intersection() { translate([0,0,LID_Z]) lid(); wires(S_D, 0, S_H); }
-// 蓋と背の高い部品
-if (TEST == "lid_parts")
-  intersection() { translate([0,0,LID_Z]) lid(); parts(); }
-// 本体（柱・壁）と熱収縮
-if (TEST == "base_shrink")
-  intersection() { base(); wires(S_D, 0, S_H); }
-// 本体と背の高い部品
-if (TEST == "base_parts")
-  intersection() { base(); parts(); }
-
-/* 基板を受ける柱が 4 本とも在るか。下穴(φ2.1)と柱(φ4.8)の間を突く。 */
+if (TEST == "lid_wire")   intersection() { lid_placed(); wires(W_D, 0, 40); }
+if (TEST == "lid_shrink") intersection() { lid_placed(); wires(S_D, 0, S_H); }
+if (TEST == "lid_parts")  intersection() { lid_placed(); pcb_parts(); }   // 蓋の柱 × 全 26 部品
+if (TEST == "base_parts") intersection() { base(); pcb_parts(); }
+/* 蓋の柱が U 溝に削られていないか。
+ * **円盤で突いてはいけない** —— 柱には素通し穴（φ2.2）が開いているので中心は必ず欠ける。
+ * 穴（半径 1.1）と外周（半径 2.0）の間、半径 1.55mm の円周上を 8 点で突く。 */
+if (TEST == "post_slot")
+  difference() {
+    post_positions()
+      for (a = [0 : 45 : 359])
+        translate([1.55*cos(a), 1.55*sin(a), LID_Z - POST_H/2]) sphere(d = 0.6);
+    lid_placed();
+  }
+/* 本体の柱が 4 本とも在るか（下穴と外周の間を突く） */
 if (TEST == "standoffs")
-  intersection() {
+  difference() {
+    hole_positions() translate([1.7, 0, FLOOR + STANDOFF/2]) sphere(d = 0.8);
     base();
-    for (x = [HOLE_IN, PCB_X - HOLE_IN], y = [HOLE_IN, PCB_Y - HOLE_IN])
-      translate([px(x) + 1.7, py(y), FLOOR + STANDOFF/2]) sphere(d = 0.8);
   }
