@@ -24,6 +24,7 @@
 
 import argparse
 import asyncio
+import codecs
 import sys
 import time
 
@@ -38,6 +39,10 @@ TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"   # 基板 → こちら
 class Console:
     def __init__(self, logfile=None):
         self.log = None
+        # **逐次デコーダが要る。** 基板側は notify の上限に収まるようバイト数で
+        # 刻んでおり、UTF-8 の多バイト文字が区切りをまたぐ。通知ごとに独立して
+        # decode すると日本語が化ける（実機で確認）。
+        self.dec = codecs.getincrementaldecoder("utf-8")("replace")
         if logfile:
             self.open_log(logfile)
 
@@ -49,7 +54,7 @@ class Console:
         print(f"[記録先 {path}]")
 
     def feed(self, data: bytes):
-        s = data.decode("utf-8", "replace")
+        s = self.dec.decode(data)
         sys.stdout.write(s)
         sys.stdout.flush()
         if self.log:
@@ -58,10 +63,17 @@ class Console:
 
 
 async def run(timeout: float, logfile: str | None) -> int:
-    print(f"{DEV_NAME} を探す（{timeout:.0f} 秒）…")
-    dev = await BleakScanner.find_device_by_name(DEV_NAME, timeout=timeout)
+    # **名前ではなくサービス UUID で探す。** macOS は一度見たデバイスの名前を
+    # キャッシュしていて、ファームを入れ替えても古い名前を返し続ける（実機で確認。
+    # explore を焼いた後も MC52-selftest と表示された）。サービス UUID は
+    # 広告パケットから毎回読まれるのでキャッシュの影響を受けない。
+    print(f"サービス {SVC_UUID[:8]}… を探す（{timeout:.0f} 秒）…")
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, ad: SVC_UUID.lower() in [u.lower() for u in (ad.service_uuids or [])],
+        timeout=timeout)
     if dev is None:
-        print("見つからない。基板に 12V が入っているか確認する")
+        print(f"見つからない。基板に 12V が入っているか確認する")
+        print(f"（{DEV_NAME} という名前で探していない。macOS の名前キャッシュを避けるため）")
         return 1
 
     con = Console(logfile)
@@ -90,6 +102,7 @@ async def run(timeout: float, logfile: str | None) -> int:
                 break
             line = line.rstrip("\n")
             if line in ("!q", "!quit"):
+                await asyncio.sleep(1.0)      # 残りの通知を受け切ってから抜ける
                 break
             if line.startswith("!log "):
                 con.open_log(line[5:].strip())
