@@ -208,8 +208,11 @@ async def run(a) -> int:
         await send(f"poll {' '.join(a.tables)} {a.ms}")
 
         loop = asyncio.get_running_loop()
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
+        # **端末でない場合もある**（記録を取るだけの自動実行）。その時は入力を諦めて
+        # 描画だけ回す。termios を非 TTY に当てると例外で落ちる
+        tty_ok = sys.stdin.isatty()
+        fd = sys.stdin.fileno() if tty_ok else -1
+        old = termios.tcgetattr(fd) if tty_ok else None
         quit_ev = asyncio.Event()
         outq = asyncio.Queue()
 
@@ -232,10 +235,14 @@ async def run(a) -> int:
                     sc.input += ch
 
         try:
-            tty.setcbreak(fd)
-            loop.add_reader(fd, on_key)
+            if tty_ok:
+                tty.setcbreak(fd)
+                loop.add_reader(fd, on_key)
             sys.stdout.write("\033[2J")
+            deadline = time.monotonic() + a.sec if a.sec else None
             while not quit_ev.is_set():
+                if deadline and time.monotonic() > deadline:
+                    break
                 while not outq.empty():
                     await send(outq.get_nowait())
                 sc.render()
@@ -244,8 +251,9 @@ async def run(a) -> int:
                 except asyncio.TimeoutError:
                     pass
         finally:
-            loop.remove_reader(fd)
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            if tty_ok:
+                loop.remove_reader(fd)
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.flush()
             # **止めてから抜ける。** 放っておくと基板は流し続ける
@@ -269,6 +277,7 @@ def main() -> int:
     ap.add_argument("--rec", help="同時に基板側の記録を開始する（名前）")
     ap.add_argument("--init", action="store_true", help="先に w（独自層の初期化）を打つ")
     ap.add_argument("--fps", type=float, default=5.0, help="描き直しの回数 [/s]")
+    ap.add_argument("--sec", type=float, help="この秒数で自動終了（既定は q まで）")
     ap.add_argument("-t", "--timeout", type=float, default=20.0, help="スキャンの秒数")
     ap.add_argument("--no-color", action="store_true")
     a = ap.parse_args()

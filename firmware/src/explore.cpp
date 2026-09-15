@@ -316,8 +316,13 @@ static void cmdPoll(char *arg) {
   pollT0 = pollLast = millis(); pollCycles = 0;
   char b[128]; int p = 0;
   for (int i = 0; i < tn; i++) p += snprintf(b + p, sizeof b - p, " %02X", tb[i]);
-  outf("開始:%s を %lu ms 周期（1 テーブル 60〜85ms なので %d 本だと実効 %lu ms 程度）\n",
-       b, (unsigned long)iv, tn, (unsigned long)(iv > (uint32_t)tn * 75 ? iv : (uint32_t)tn * 75));
+  /* **無応答のほうが遅い。** 応答すれば 60〜85ms で終わるが、応答しないテーブルは
+   * 待ち時間 200ms を使い切る。s の結果で絞らないと周期をここで捨てる。 */
+  outf("開始:%s を %lu ms 周期（応答時 1 本 60〜85ms → %d 本で最短 %lu ms /"
+       " 無応答は 200ms 待つので最長 %lu ms）\n",
+       b, (unsigned long)iv, tn,
+       (unsigned long)(iv > (uint32_t)tn * 75 ? iv : (uint32_t)tn * 75),
+       (unsigned long)(iv > (uint32_t)tn * 210 ? iv : (uint32_t)tn * 210));
   if (!keepOn) out("※ `w` で独自層を起こしていない。無応答が続くなら先に w\n");
 }
 
