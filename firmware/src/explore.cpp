@@ -28,6 +28,7 @@
 #include <ArduinoOTA.h>
 #include <WiFiMulti.h>
 #include <Preferences.h>
+#include <LittleFS.h>
 
 static const int PIN_KL_TX = 17;
 static const int PIN_KL_RX = 18;
@@ -75,6 +76,10 @@ static bool csOk2c(const uint8_t *b, size_t n)    { uint8_t s = 0; for (size_t i
 /* 標準 OBD 層（ISO 14230）は単純和。 */
 static uint8_t csumAdd(const uint8_t *b, size_t n){ uint8_t s = 0; for (size_t i = 0; i < n; i++) s += b[i]; return s; }
 
+// 記録は下で定義するが、xfer から呼ぶので前方宣言する
+static const uint8_t T_PROP = 0x01, T_OBD = 0x02, T_REQ = 0x03, T_NOTE = 0x10;
+static void logRec(uint8_t type, const uint8_t *d, size_t n);
+
 static void klRaw()  { KL.end(); pinMode(PIN_KL_TX, OUTPUT); }
 static void klUart() { KL.begin(klBaud, SERIAL_8N1, PIN_KL_RX, PIN_KL_TX); }
 
@@ -98,6 +103,7 @@ static int echoBad = 0, echoGot = 0;
 static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
                 uint32_t wait_ms, bool lenAt2) {
   while (KL.available()) KL.read();
+  logRec(T_REQ, req, n);            // **要求も残す。** 何を訊いたかが対で要る
   KL.write(req, n); KL.flush();
   uint32_t t0 = millis();
   echoBad = 0; echoGot = 0;
@@ -115,9 +121,10 @@ static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
     if (got < cap) resp[got] = c;
     got++;
     if (lenAt2 && got == 2) { need = c; if (need < 3 || need > cap) return -2; }
-    if (need && got >= need) return (int)need;
+    if (need && got >= need) { logRec(lenAt2 ? T_PROP : T_OBD, resp, need); return (int)need; }
     t0 = millis();
   }
+  if (got) logRec(lenAt2 ? T_PROP : T_OBD, resp, got > cap ? cap : got);
   return got ? (int)got : 0;           // 長さ不明のときは静かになった時点の全量
 }
 
@@ -370,6 +377,129 @@ static void cmdOta(const char *arg) {
   outf("  pio run -e explore_ota -t upload --upload-port %s\n", ip.c_str());
 }
 
+/* ── 記録 ─────────────────────────────────────────────────
+ * **生フレームをそのまま追記する。** 復号は Mac 側でやる。
+ * テーブルのバイト配置も噴射時間の単位も未確定なので、解釈して書くと
+ * 間違いが確定した時点で過去のログが全部無価値になる。`gear.md` の
+ * 「ログには ECU の生値を記録する」を一段下（フィールド解釈そのもの）へ
+ * 適用しただけ。
+ *
+ *   ファイル先頭   "MC52" ver:u8  開始壁時計:u32(unix)
+ *   レコード       type:u8  dt:u16(前レコードからの ms)  len:u8  data[len]
+ *
+ * **要求も記録する。** 何を訊いて何が返ったかが対になるので診断に効く。
+ *
+ * 書き出しは 4KB たまるか 5 秒で追記する。IG 連動で電源が落ちる基板なので、
+ * 停止を押すまで 1 バイトも書かない作りだと切った瞬間に全部消える。 */
+static const uint8_t LOG_VER = 1;
+
+static File logFile;
+static bool recOn = false;
+static uint8_t logBuf[4096];
+static size_t logLen = 0;
+static uint32_t lastRecMs = 0, lastFlush = 0, logBytes = 0, logRecs = 0;
+
+static void logFlush() {
+  if (!logFile || !logLen) return;
+  logFile.write(logBuf, logLen);
+  logFile.flush();
+  logBytes += logLen;
+  logLen = 0;
+  lastFlush = millis();
+}
+static void logRec(uint8_t type, const uint8_t *d, size_t n) {
+  if (!recOn || !logFile || n > 255) return;
+  uint32_t now = millis();
+  uint32_t dt = lastRecMs ? now - lastRecMs : 0;
+  lastRecMs = now;
+  if (logLen + 4 + n > sizeof logBuf) logFlush();
+  logBuf[logLen++] = type;
+  logBuf[logLen++] = dt > 0xFFFF ? 0xFF : dt & 0xFF;
+  logBuf[logLen++] = dt > 0xFFFF ? 0xFF : (dt >> 8) & 0xFF;
+  logBuf[logLen++] = (uint8_t)n;
+  memcpy(logBuf + logLen, d, n); logLen += n;
+  logRecs++;
+}
+static void logTick() { if (recOn && millis() - lastFlush > 5000) logFlush(); }
+
+static void cmdRec(const char *arg) {
+  if (!strncmp(arg, "off", 3) || *arg == '0') {
+    if (!recOn) { out("記録していない\n"); return; }
+    logFlush(); logFile.close(); recOn = false;
+    outf("停止。%lu レコード / %lu バイト\n", (unsigned long)logRecs, (unsigned long)logBytes);
+    return;
+  }
+  if (recOn) { outf("記録中（%lu レコード）\n", (unsigned long)logRecs); return; }
+  char name[48];
+  time_t t = time(nullptr);
+  if (*arg) snprintf(name, sizeof name, "/%s.bin", arg);
+  else {
+    struct tm tmv; localtime_r(&t, &tmv);
+    snprintf(name, sizeof name, "/%04d%02d%02d_%02d%02d%02d.bin",
+             tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+  }
+  logFile = LittleFS.open(name, "w");
+  if (!logFile) { outf("作れない: %s\n", name); return; }
+  uint8_t hdr[9] = {'M','C','5','2', LOG_VER,
+                    (uint8_t)(t & 0xFF), (uint8_t)((t >> 8) & 0xFF),
+                    (uint8_t)((t >> 16) & 0xFF), (uint8_t)((t >> 24) & 0xFF)};
+  logFile.write(hdr, sizeof hdr);
+  logLen = 0; logBytes = sizeof hdr; logRecs = 0; lastRecMs = 0; lastFlush = millis();
+  recOn = true;
+  outf("記録開始 %s（壁時計 %lu）%s\n", name, (unsigned long)t,
+       t < 1700000000 ? "  ★ 時刻が未設定。time <unix> で合わせる" : "");
+}
+
+static void cmdLs() {
+  File root = LittleFS.open("/");
+  if (!root) { out("開けない\n"); return; }
+  int n = 0; size_t tot = 0;
+  for (File f = root.openNextFile(); f; f = root.openNextFile()) {
+    outf("  %-28s %8u バイト\n", f.name(), (unsigned)f.size());
+    tot += f.size(); n++;
+  }
+  outf("%d ファイル / %u バイト  空き %u KB\n", n, (unsigned)tot,
+       (unsigned)((LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024));
+}
+
+/* base64 で notify のテキスト経路に流す。実測 33KB/s に対し実効 25KB/s。
+ * **CRC32 を添えて Mac 側で検証する。** */
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static uint32_t crc32(uint32_t c, const uint8_t *b, size_t n) {
+  c = ~c;
+  for (size_t i = 0; i < n; i++) {
+    c ^= b[i];
+    for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (-(int32_t)(c & 1)));
+  }
+  return ~c;
+}
+static void cmdGet(const char *name) {
+  char path[64]; snprintf(path, sizeof path, "%s%s", *name == '/' ? "" : "/", name);
+  File f = LittleFS.open(path, "r");
+  if (!f) { outf("無い: %s\n", path); return; }
+  size_t sz = f.size();
+  outf("BEGIN %s %u\n", path, (unsigned)sz);
+  uint8_t in[45]; char line[64];
+  uint32_t crc = 0;
+  while (true) {
+    int n = f.read(in, sizeof in);
+    if (n <= 0) break;
+    crc = crc32(crc, in, n);
+    int p = 0;
+    for (int i = 0; i < n; i += 3) {
+      uint32_t v = in[i] << 16 | (i + 1 < n ? in[i+1] << 8 : 0) | (i + 2 < n ? in[i+2] : 0);
+      line[p++] = B64[(v >> 18) & 63];
+      line[p++] = B64[(v >> 12) & 63];
+      line[p++] = i + 1 < n ? B64[(v >> 6) & 63] : '=';
+      line[p++] = i + 2 < n ? B64[v & 63] : '=';
+    }
+    line[p++] = '\n'; line[p] = 0;
+    out(line);
+  }
+  f.close();
+  outf("END %08lX\n", (unsigned long)crc);
+}
+
 // ── コマンド解釈 ─────────────────────────────────────────
 static int hexBytes(const char *s, uint8_t *b, size_t cap) {
   int n = 0, hi = -1;
@@ -403,6 +533,11 @@ static void help() {
       "  o           fast init して 0C / 0D を読む\n"
       "[物理層]\n"
       "  k           K ライン折り返し（車両に挿していない状態で。配線の検証）\n"
+      "[記録] 生フレームを LittleFS へ追記。復号は Mac 側\n"
+      "  rec on [名前]       記録開始（名前を省くと日時）   rec off  停止\n"
+      "  ls / df / rm <名前> 一覧 / 空き / 削除\n"
+      "  get <名前>          BLE で吸い出す（base64 ＋ CRC32）\n"
+      "  note <文字列>       ログに目印を入れる\n"
       "[更新] J3 のジャンパ操作を無くす\n"
       "  wifi                登録済みの一覧   wifi clear  全消し\n"
       "  wifi <ssid> <pass>  NVS に保存（最大 4 件。ソースには書かない）\n"
@@ -426,6 +561,19 @@ static void runCmd(char *line) {
   if (!strcmp(line, "m")) { cmdTable(0x11); cmdTable(0x10); return; }
   if (!strcmp(line, "o")) { cmdObd(); return; }
   if (!strcmp(line, "k")) { cmdLoop(); return; }
+  if (!strcmp(line, "rec")) { cmdRec(arg); return; }
+  if (!strcmp(line, "ls"))  { cmdLs(); return; }
+  if (!strcmp(line, "get")) { if (*arg) cmdGet(arg); else out("get <名前>\n"); return; }
+  if (!strcmp(line, "rm")) {
+    char path[64]; snprintf(path, sizeof path, "%s%s", *arg == '/' ? "" : "/", arg);
+    outf(LittleFS.remove(path) ? "消した %s\n" : "消せない %s\n", path); return;
+  }
+  if (!strcmp(line, "df")) {
+    outf("容量 %u KB / 使用 %u KB / 空き %u KB\n",
+         (unsigned)(LittleFS.totalBytes()/1024), (unsigned)(LittleFS.usedBytes()/1024),
+         (unsigned)((LittleFS.totalBytes()-LittleFS.usedBytes())/1024)); return;
+  }
+  if (!strcmp(line, "note")) { logRec(T_NOTE, (const uint8_t*)arg, strlen(arg)); out("記録した\n"); return; }
   if (!strcmp(line, "wifi")) { cmdWifi(arg); return; }
   if (!strcmp(line, "ota")) { cmdOta(arg); return; }
   if (!strcmp(line, "t")) { uint8_t t[1]; if (hexBytes(arg, t, 1) == 1) cmdTable(t[0]); else out("t の後に 16 進 2 桁\n"); return; }
@@ -488,6 +636,7 @@ void setup() {
   Serial.begin(115200);
   delay(400);
   klRaw(); digitalWrite(PIN_KL_TX, HIGH); klUart();
+  if (!LittleFS.begin(true)) Serial.println("LittleFS をマウントできない");
 
   BLEDevice::init("MC52-explore");
   BLEDevice::setMTU(247);
@@ -509,6 +658,7 @@ void setup() {
 
 void loop() {
   if (otaOn) ArduinoOTA.handle();
+  logTick();
   keepAlive();
   while (Serial.available()) {
     char ch = Serial.read();
