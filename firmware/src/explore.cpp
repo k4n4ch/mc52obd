@@ -26,6 +26,7 @@
 #include <time.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <WiFiMulti.h>
 #include <Preferences.h>
 
 static const int PIN_KL_TX = 17;
@@ -292,24 +293,43 @@ static void cmdObd() {
  * 死ぬので、有線の経路を潰してはいけない。 */
 static Preferences prefs;
 static bool otaOn = false;
+static WiFiMulti wifiMulti;
+
+/* **複数の AP を登録できる。** 家では自宅の WiFi、バイクの横ではスマホの
+ * テザリングになるため。`WiFiMulti` が**見えているものを自動で選ぶ**ので、
+ * 場所によって設定を変える必要は無い。 */
+static const int WIFI_MAX = 4;
 
 static void cmdWifi(const char *arg) {
+  prefs.begin("mc52", false);
+  int n = prefs.getInt("wn", 0);
   if (!*arg) {
-    prefs.begin("mc52", true);
-    String ss = prefs.getString("ssid", "");
-    prefs.end();
-    outf("保存済み SSID: %s\n", ss.length() ? ss.c_str() : "(なし)");
-    return;
+    if (!n) out("保存済みの WiFi: (なし)\n");
+    for (int i = 0; i < n; i++) {
+      char k[8]; snprintf(k, sizeof k, "s%d", i);
+      outf("  [%d] %s\n", i, prefs.getString(k, "").c_str());
+    }
+    prefs.end(); return;
   }
+  if (!strcmp(arg, "clear")) { prefs.putInt("wn", 0); prefs.end(); out("全部消した\n"); return; }
   char buf[160]; strncpy(buf, arg, sizeof buf - 1); buf[sizeof buf - 1] = 0;
   char *sp = strchr(buf, ' ');
-  if (!sp) { out("wifi <ssid> <pass>\n"); return; }
+  if (!sp) { prefs.end(); out("wifi <ssid> <pass>  /  wifi clear  /  wifi（一覧）\n"); return; }
   *sp++ = 0;
-  prefs.begin("mc52", false);
-  prefs.putString("ssid", buf);
-  prefs.putString("pass", sp);
+  int slot = -1;
+  for (int i = 0; i < n; i++) {
+    char k[8]; snprintf(k, sizeof k, "s%d", i);
+    if (prefs.getString(k, "") == buf) { slot = i; break; }
+  }
+  if (slot < 0) {
+    if (n >= WIFI_MAX) { prefs.end(); outf("上限 %d 個。wifi clear で消す\n", WIFI_MAX); return; }
+    slot = n++;
+  }
+  char ks[8], kp[8];
+  snprintf(ks, sizeof ks, "s%d", slot); snprintf(kp, sizeof kp, "p%d", slot);
+  prefs.putString(ks, buf); prefs.putString(kp, sp); prefs.putInt("wn", n);
   prefs.end();
-  outf("保存した SSID=%s（パスワードは表示しない）\n", buf);
+  outf("[%d] に保存した SSID=%s（パスワードは表示しない）。登録 %d 個\n", slot, buf, n);
 }
 
 static void cmdOta(const char *arg) {
@@ -320,15 +340,21 @@ static void cmdOta(const char *arg) {
   }
   if (otaOn) { outf("既に有効  IP %s\n", WiFi.localIP().toString().c_str()); return; }
   prefs.begin("mc52", true);
-  String ss = prefs.getString("ssid", ""), pw = prefs.getString("pass", "");
-  prefs.end();
-  if (!ss.length()) { out("先に wifi <ssid> <pass> で設定する\n"); return; }
-  outf("%s に接続中…\n", ss.c_str());
+  int n = prefs.getInt("wn", 0);
+  if (!n) { prefs.end(); out("先に wifi <ssid> <pass> で設定する\n"); return; }
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ss.c_str(), pw.c_str());
+  for (int i = 0; i < n; i++) {
+    char ks[8], kp[8];
+    snprintf(ks, sizeof ks, "s%d", i); snprintf(kp, sizeof kp, "p%d", i);
+    String ss = prefs.getString(ks, ""), pw = prefs.getString(kp, "");
+    if (ss.length()) wifiMulti.addAP(ss.c_str(), pw.c_str());
+  }
+  prefs.end();
+  outf("登録 %d 個から、見えているものを探す…（テザリングなら先に ON に）\n", n);
   uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(200);
-  if (WiFi.status() != WL_CONNECTED) { out("接続できない\n"); WiFi.mode(WIFI_OFF); return; }
+  while (wifiMulti.run() != WL_CONNECTED && millis() - t0 < 25000) delay(200);
+  if (WiFi.status() != WL_CONNECTED) { out("どれにも繋がらない\n"); WiFi.mode(WIFI_OFF); return; }
+  outf("接続: %s\n", WiFi.SSID().c_str());
   ArduinoOTA.setHostname("mc52-explore");
   ArduinoOTA.onStart([] { out("OTA 開始\n"); });
   ArduinoOTA.onEnd([]   { out("OTA 完了。再起動する\n"); });
@@ -359,7 +385,8 @@ static int hexBytes(const char *s, uint8_t *b, size_t cap) {
 }
 
 static void help() {
-  out("\n== MC52 K ライン探索コンソール ==\n"
+  outf("\n== MC52 K ライン探索コンソール ==  ビルド %s %s\n", __DATE__, __TIME__);
+  out(
       "[土台] これがあれば未知のプロトコルを焼き直さずに試せる\n"
       "  x <hex..>   バイト列をそのまま送って返りを見る\n"
       "  X <hex..>   チェックサム（総和の2の補数）を付けて送る\n"
@@ -377,7 +404,9 @@ static void help() {
       "[物理層]\n"
       "  k           K ライン折り返し（車両に挿していない状態で。配線の検証）\n"
       "[更新] J3 のジャンパ操作を無くす\n"
-      "  wifi <ssid> <pass>  資格情報を NVS に保存（ソースには書かない）\n"
+      "  wifi                登録済みの一覧   wifi clear  全消し\n"
+      "  wifi <ssid> <pass>  NVS に保存（最大 4 件。ソースには書かない）\n"
+      "                      家の WiFi とスマホのテザリングを両方入れておける\n"
       "  ota on | off        OTA を有効化して IP を返す（既定は切。再起動で戻る）\n"
       "[その他]\n"
       "  time <unix> 壁時計を合わせる（GPS ログとの突き合わせに要る）\n"
