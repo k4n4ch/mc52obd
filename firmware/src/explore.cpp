@@ -1,0 +1,374 @@
+/* MC52 — K ライン探索コンソール（BLE / シリアル両対応）
+ *
+ * **探索フェーズ用。停車・エンジン掛けで使う。**
+ *
+ * 設計の要は「**書き換え回数を最小にする**」こと。いま分かっていないことが多すぎて、
+ * 決め打ちの手順を並べたファームだと仮説が外れるたびに焼き直しになる。
+ *
+ *   ウェイクアップが CRF 系か CBR 系か、どちらでもないか
+ *   初期化フレームが同じか / keep-alive の中身（仕様に記載が無い）
+ *   テーブル番号の実在範囲 / 未対応テーブルの応答
+ *   ブレーク長が本当に 70ms か
+ *
+ * そこで**任意のバイト列と任意長ブレークを Mac 側から投げられる**ようにしてある。
+ * 便利コマンド（o / w / s / d / m）はその上に乗せた薄い層でしかない。
+ *
+ * **コマンドは BLE から入る。** バイクの横でノート PC を J3 に繋ぎたくないため。
+ * シリアルも同じパーサを共有していて、BLE が死んだときの逃げ道になる。
+ *
+ * 仕様の出所と信頼度は PROVENANCE.md / KLINE_PROPRIETARY.md。**MC52 では全部未検証。**
+ */
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <time.h>
+
+static const int PIN_KL_TX = 17;
+static const int PIN_KL_RX = 18;
+static uint32_t klBaud = 10400;
+HardwareSerial KL(1);
+
+// ── 出力（シリアルと BLE の両方へ） ──────────────────────
+static const char *SVC_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+static const char *RX_UUID  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  // Mac → 基板
+static const char *TX_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";  // 基板 → Mac
+static BLECharacteristic *txChar = nullptr;
+static volatile bool bleConn = false;
+
+static void out(const char *s) {
+  Serial.print(s);
+  if (!bleConn || !txChar) return;
+  // notify の 1 回の上限に収まるよう刻む。詰めすぎるとスタックが詰まるので少し待つ
+  const size_t CH = 180;
+  for (size_t i = 0; s[i]; ) {
+    size_t n = strnlen(s + i, CH);
+    txChar->setValue((uint8_t *)(s + i), n);
+    txChar->notify();
+    i += n;
+    delay(6);
+  }
+}
+static void outf(const char *fmt, ...) {
+  char b[512];
+  va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
+  out(b);
+}
+static void dump(const char *tag, const uint8_t *b, size_t n) {
+  char line[600]; int p = snprintf(line, sizeof line, "%s[%2u]", tag, (unsigned)n);
+  for (size_t i = 0; i < n && p < (int)sizeof line - 4; i++)
+    p += snprintf(line + p, sizeof line - p, " %02X", b[i]);
+  snprintf(line + p, sizeof line - p, "\n");
+  out(line);
+}
+
+// ── K ラインの土台 ───────────────────────────────────────
+/* 独自層のチェックサムは**総和の 2 の補数**（ISO 14230 の単純和とは別物）。
+ * 受信側は全バイトの総和が 0 になることで検証できる。 */
+static uint8_t csum2c(const uint8_t *b, size_t n) { uint8_t s = 0; for (size_t i = 0; i < n; i++) s -= b[i]; return s; }
+static bool csOk2c(const uint8_t *b, size_t n)    { uint8_t s = 0; for (size_t i = 0; i < n; i++) s += b[i]; return s == 0; }
+/* 標準 OBD 層（ISO 14230）は単純和。 */
+static uint8_t csumAdd(const uint8_t *b, size_t n){ uint8_t s = 0; for (size_t i = 0; i < n; i++) s += b[i]; return s; }
+
+static void klRaw()  { KL.end(); pinMode(PIN_KL_TX, OUTPUT); }
+static void klUart() { KL.begin(klBaud, SERIAL_8N1, PIN_KL_RX, PIN_KL_TX); }
+
+/* **K 線を任意の長さ Low に落とす。** ELM327 にできない部分そのもの
+ * （fast init は 25ms 固定で、独自層が要求する 70ms を出せない）。 */
+static void klBreak(uint32_t lowMs, uint32_t highMs) {
+  klRaw();
+  digitalWrite(PIN_KL_TX, HIGH); delay(200);
+  digitalWrite(PIN_KL_TX, LOW);  delay(lowMs);
+  digitalWrite(PIN_KL_TX, HIGH); delay(highMs);
+  klUart();
+}
+
+/* 送信 → 半二重のエコーを捨てる → 応答を受ける。
+ * `lenAt2` = 2 バイト目が総バイト数（独自層）。false なら長さを見ずに静かになるまで読む。 */
+static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
+                uint32_t wait_ms, bool lenAt2) {
+  while (KL.available()) KL.read();
+  KL.write(req, n); KL.flush();
+  uint32_t t0 = millis();
+  for (size_t i = 0; i < n && millis() - t0 < 400; ) if (KL.available()) { KL.read(); i++; }
+
+  size_t got = 0, need = 0;
+  t0 = millis();
+  while (millis() - t0 < wait_ms) {
+    if (!KL.available()) { delay(1); continue; }
+    uint8_t c = KL.read();
+    if (got < cap) resp[got] = c;
+    got++;
+    if (lenAt2 && got == 2) { need = c; if (need < 3 || need > cap) return -2; }
+    if (need && got >= need) return (int)need;
+    t0 = millis();
+  }
+  return got ? (int)got : 0;           // 長さ不明のときは静かになった時点の全量
+}
+
+// ── 状態 ─────────────────────────────────────────────────
+static bool keepOn = false;
+static uint32_t lastKeep = 0;
+static uint8_t keepFrame[8] = {0x72, 0x05, 0x71, 0x00, 0x18};  // CBR600RR はテーブル 0x00 を約 2 秒周期
+static size_t keepLen = 5;
+static uint32_t keepMs = 2000;
+
+static void keepAlive() {
+  if (!keepOn || millis() - lastKeep < keepMs) return;
+  uint8_t r[64];
+  xfer(keepFrame, keepLen, r, sizeof r, 150, true);
+  lastKeep = millis();
+}
+
+// ── 便利コマンド ─────────────────────────────────────────
+static int readTable(uint8_t t, uint8_t *resp, size_t cap, uint32_t wait = 250) {
+  uint8_t f[5] = {0x72, 0x05, 0x71, t, 0};
+  f[4] = csum2c(f, 4);
+  return xfer(f, 5, resp, cap, wait, true);
+}
+
+static void cmdPropInit() {
+  static const uint8_t WA[4] = {0xFE, 0x04, 0x72, 0x8C};   // CRF250L
+  static const uint8_t WB[4] = {0xFE, 0x04, 0xFF, 0xFF};   // CBR600RR
+  static const uint8_t IN[5] = {0x72, 0x05, 0x00, 0xF0, 0x99};
+  uint8_t r[64];
+  for (int v = 0; v < 2; v++) {
+    outf("ウェイクアップ %s（%s 系）\n", v ? "FE 04 FF FF" : "FE 04 72 8C", v ? "CBR600RR" : "CRF250L");
+    klBreak(70, 120);
+    int n = xfer(v ? WB : WA, 4, r, sizeof r, 300, false);
+    if (n > 0) dump("  wake 応答 ", r, n);
+    delay(200);
+    n = xfer(IN, 5, r, sizeof r, 400, true);
+    if (n > 0) {
+      dump("  init 応答 ", r, n);
+      outf("  **独自層が応答した**（ウェイクアップ %s）%s\n", v ? "B" : "A",
+           csOk2c(r, n) ? "" : "  ※ CS 不一致");
+      keepOn = true; lastKeep = millis();
+      return;
+    }
+    outf("  無応答\n");
+  }
+  out("**両方とも応答なし**\n");
+}
+
+static void cmdScan() {
+  out("-- テーブル総当たり 0x00〜0xFF --\n");
+  uint8_t r[160];
+  int ok = 0;
+  for (int t = 0; t <= 0xFF; t++) {
+    keepAlive();
+    int n = readTable((uint8_t)t, r, sizeof r, 200);
+    if (n > 0) {
+      ok++;
+      char tag[16]; snprintf(tag, sizeof tag, "  %02X %s", t, csOk2c(r, n) ? "  " : "★ ");
+      dump(tag, r, n);
+    }
+    delay(25);
+  }
+  outf("応答 %d / 256（★ = チェックサム不一致）\n", ok);
+  if (!ok) out("**1 つも応答しない。喋らないか、ウェイクアップが違う**\n");
+}
+
+/* 0xD1 の index 4 が噛み合い状態。位置は 2 系統で裏が取れているが、
+ * **値の対応は CBR600RR 側の記述のみで MC52 では未検証。**
+ * ギヤを入れてクラッチを握った状態で 0x01 を返すかどうかが、比推定の
+ * クラッチ切り誤判定を潰せるかの分かれ目になる。 */
+static void showD1(const uint8_t *r, int n) {
+  if (n < 6) { out("  短すぎる\n"); return; }
+  uint8_t s = r[4];
+  outf("  index4 = 0x%02X  %s\n", s,
+       s == 0x00 ? "イン（段が入っている）" : s == 0x01 ? "ニュートラルまたはクラッチ"
+     : s == 0x03 ? "サイドスタンド" : "**未知の値**");
+  char b[256]; int p = snprintf(b, sizeof b, "  他 :");
+  for (int i = 5; i < n - 1 && p < (int)sizeof b - 12; i++) p += snprintf(b + p, sizeof b - p, " [%d]=%02X", i, r[i]);
+  snprintf(b + p, sizeof b - p, "\n"); out(b);
+}
+
+/* 0x10 / 0x11 のセンサ群。**噴射時間は index 18-19**（CRF250L の実測記録）。
+ * 単位・endian・スケールは不明なので両方の解釈を出す。
+ * 停車でも空吹かしで動くので、位置と桁はここで取れる。 */
+static void showSensors(const uint8_t *r, int n) {
+  auto v = [&](int i) { return i < n ? r[i] : 0; };
+  if (n < 20) { outf("  長さ %d。先行事例の配置に満たない\n", n); return; }
+  outf("  RPM   [4-5]   %u\n", (v(4) << 8) | v(5));
+  outf("  TPS   [6-7]   %.2f V / %.1f %%\n", v(6) * 5.0 / 256, v(7) / 16.0 * 10);
+  outf("  ECT   [8-9]   %.2f V / %d C\n", v(8) * 5.0 / 256, (int)v(9) - 40);
+  outf("  IAT   [10-11] %.2f V / %d C\n", v(10) * 5.0 / 256, (int)v(11) - 40);
+  outf("  MAP   [12-13] %.2f V / %u kPa\n", v(12) * 5.0 / 256, v(13));
+  outf("  電圧  [16]    %.1f V\n", v(16) / 10.0);
+  outf("  車速  [17]    %u km/h\n", v(17));
+  outf("  噴射? [18-19] %02X %02X （BE %u / LE %u）**単位もスケールも不明**\n",
+       v(18), v(19), (v(18) << 8) | v(19), (v(19) << 8) | v(18));
+}
+
+static void cmdTable(uint8_t t) {
+  uint8_t r[160];
+  keepAlive();
+  int n = readTable(t, r, sizeof r);
+  if (n <= 0) { outf("%02X 応答なし\n", t); return; }
+  dump("", r, n);
+  if (!csOk2c(r, n)) out("  ※ チェックサム不一致\n");
+  if (t == 0xD1) showD1(r, n);
+  if (t == 0x10 || t == 0x11 || t == 0x61) showSensors(r, n);
+}
+
+/* 標準 OBD 層。ELM327 で既に取れているものの再現で、**足場**。
+ * ここが通れば UART・タイミング・エコー処理が正しいと分かり、独自層が
+ * 無反応だったときに「実装が悪いのか MC52 が喋らないのか」を切り分けられる。 */
+static void cmdObd() {
+  static const uint8_t IN[5] = {0xC1, 0x33, 0xF1, 0x81, 0x66};
+  uint8_t r[64];
+  keepOn = false;
+  out("-- 標準 OBD 層（ISO 14230-4 KWP FAST）--\n");
+  klBreak(25, 25);
+  int n = xfer(IN, 5, r, sizeof r, 400, false);
+  if (n <= 0) { out("  StartCommunication に無応答\n"); return; }
+  dump("  init 応答 ", r, n);
+  for (uint8_t pid : {0x0C, 0x0D}) {
+    uint8_t q[6] = {0xC2, 0x33, 0xF1, 0x01, pid, 0};
+    q[5] = csumAdd(q, 5);
+    n = xfer(q, 6, r, sizeof r, 300, false);
+    if (n <= 0) { outf("  %02X 無応答\n", pid); continue; }
+    dump("  ", r, n);
+    if (n >= 7 && r[3] == 0x41 && r[4] == 0x0C) outf("  → 回転数 %d rpm\n", ((r[5] << 8) | r[6]) / 4);
+    if (n >= 6 && r[3] == 0x41 && r[4] == 0x0D) outf("  → 車速 %d km/h\n", r[5]);
+    delay(60);
+  }
+}
+
+// ── コマンド解釈 ─────────────────────────────────────────
+static int hexBytes(const char *s, uint8_t *b, size_t cap) {
+  int n = 0, hi = -1;
+  for (; *s && n < (int)cap; s++) {
+    int d = (*s >= '0' && *s <= '9') ? *s - '0'
+          : (*s >= 'a' && *s <= 'f') ? *s - 'a' + 10
+          : (*s >= 'A' && *s <= 'F') ? *s - 'A' + 10 : -1;
+    if (d < 0) { if (hi >= 0) { b[n++] = hi; hi = -1; } continue; }
+    if (hi < 0) hi = d; else { b[n++] = hi * 16 + d; hi = -1; }
+  }
+  if (hi >= 0 && n < (int)cap) b[n++] = hi;
+  return n;
+}
+
+static void help() {
+  out("\n== MC52 K ライン探索コンソール ==\n"
+      "[土台] これがあれば未知のプロトコルを焼き直さずに試せる\n"
+      "  x <hex..>   バイト列をそのまま送って返りを見る\n"
+      "  X <hex..>   チェックサム（総和の2の補数）を付けて送る\n"
+      "  brk <ms>    K 線を指定 ms だけ Low に落とす（ELM327 にできない部分）\n"
+      "  baud <n>    K ラインの速度を変える（既定 10400）\n"
+      "[独自層] 本命。ELM327 では原理的に叩けない層\n"
+      "  w           初期化（70ms ブレーク → ウェイクアップ 2 種）\n"
+      "  s           テーブル 0x00〜0xFF 総当たり ★ 最初にやること\n"
+      "  d           0xD1（index4 = 噛み合い状態）\n"
+      "  m           0x11 → 0x10（センサ群。index18-19 が噴射時間か）\n"
+      "  t <XX>      任意のテーブルを 1 回読む\n"
+      "  ka <0|1>    keep-alive の入切（既定は w で入る）\n"
+      "[標準層] 足場。ELM327 で既に取れているもの\n"
+      "  o           fast init して 0C / 0D を読む\n"
+      "[その他]\n"
+      "  time <unix> 壁時計を合わせる（GPS ログとの突き合わせに要る）\n"
+      "  ?           この一覧\n"
+      "出所と信頼度は PROVENANCE.md。**MC52 では全部未検証。**\n");
+}
+
+static void runCmd(char *line) {
+  while (*line == ' ') line++;
+  char *arg = strchr(line, ' ');
+  if (arg) { *arg++ = 0; while (*arg == ' ') arg++; } else arg = (char *)"";
+
+  if (!strcmp(line, "?") || !strcmp(line, "h")) { help(); return; }
+  if (!strcmp(line, "w")) { cmdPropInit(); return; }
+  if (!strcmp(line, "s")) { cmdScan(); return; }
+  if (!strcmp(line, "d")) { cmdTable(0xD1); return; }
+  if (!strcmp(line, "m")) { cmdTable(0x11); cmdTable(0x10); return; }
+  if (!strcmp(line, "o")) { cmdObd(); return; }
+  if (!strcmp(line, "t")) { uint8_t t[1]; if (hexBytes(arg, t, 1) == 1) cmdTable(t[0]); else out("t の後に 16 進 2 桁\n"); return; }
+  if (!strcmp(line, "ka")) { keepOn = (*arg == '1'); outf("keep-alive %s\n", keepOn ? "入" : "切"); return; }
+  if (!strcmp(line, "baud")) { klBaud = atoi(arg); klUart(); outf("K ライン %lu bps\n", (unsigned long)klBaud); return; }
+  if (!strcmp(line, "brk")) {
+    uint32_t ms = atoi(arg); if (!ms) ms = 70;
+    klBreak(ms, 120); outf("%lu ms の Low を出した\n", (unsigned long)ms); return;
+  }
+  if (!strcmp(line, "time")) {
+    time_t t = (time_t)atoll(arg);
+    struct timeval tv = {t, 0}; settimeofday(&tv, nullptr);
+    outf("壁時計を %s に合わせた", ctime(&t)); return;
+  }
+  if (!strcmp(line, "x") || !strcmp(line, "X")) {
+    uint8_t b[64];
+    int n = hexBytes(arg, b, sizeof b - 1);
+    if (n < 1) { out("バイト列が無い\n"); return; }
+    if (line[0] == 'X') { b[n] = csum2c(b, n); n++; }
+    dump("送信 ", b, n);
+    uint8_t r[192];
+    int m = xfer(b, n, r, sizeof r, 400, false);
+    if (m <= 0) { out("応答なし\n"); return; }
+    dump("応答 ", r, m);
+    outf("  総和 0x%02X %s\n", (uint8_t)[&]{ uint8_t s=0; for (int i=0;i<m;i++) s+=r[i]; return s; }(),
+         csOk2c(r, m) ? "（2の補数チェックサムとして整合）" : "");
+    return;
+  }
+  outf("不明なコマンド: %s（? で一覧）\n", line);
+}
+
+// ── 入力（BLE とシリアルで同じパーサを共有） ──────────────
+static char cmdBuf[128];
+static size_t cmdLen = 0;
+static volatile bool pending = false;
+static char pendingCmd[128];
+
+class RxCb : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    std::string v = c->getValue();
+    for (char ch : v) {
+      if (ch == '\n' || ch == '\r') {
+        if (cmdLen) { cmdBuf[cmdLen] = 0; strncpy(pendingCmd, cmdBuf, sizeof pendingCmd); pending = true; cmdLen = 0; }
+      } else if (cmdLen < sizeof cmdBuf - 1) cmdBuf[cmdLen++] = ch;
+    }
+    if (cmdLen && v.find('\n') == std::string::npos && v.find('\r') == std::string::npos) {
+      // 改行なしで来た場合も 1 コマンドとして受ける（端末によっては付かない）
+      cmdBuf[cmdLen] = 0; strncpy(pendingCmd, cmdBuf, sizeof pendingCmd); pending = true; cmdLen = 0;
+    }
+  }
+};
+class SrvCb : public BLEServerCallbacks {
+  void onConnect(BLEServer *) override { bleConn = true; }
+  void onDisconnect(BLEServer *s) override { bleConn = false; s->startAdvertising(); }
+};
+
+void setup() {
+  Serial.begin(115200);
+  delay(400);
+  klRaw(); digitalWrite(PIN_KL_TX, HIGH); klUart();
+
+  BLEDevice::init("MC52-explore");
+  BLEDevice::setMTU(247);
+  BLEServer *srv = BLEDevice::createServer();
+  srv->setCallbacks(new SrvCb());
+  BLEService *svc = srv->createService(SVC_UUID);
+  txChar = svc->createCharacteristic(TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  txChar->addDescriptor(new BLE2902());
+  BLECharacteristic *rx = svc->createCharacteristic(
+      RX_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  rx->setCallbacks(new RxCb());
+  svc->start();
+  srv->getAdvertising()->addServiceUUID(SVC_UUID);
+  srv->getAdvertising()->start();
+
+  help();
+  out("BLE: MC52-explore として広告中\n");
+}
+
+void loop() {
+  keepAlive();
+  while (Serial.available()) {
+    char ch = Serial.read();
+    if (ch == '\n' || ch == '\r') {
+      if (cmdLen) { cmdBuf[cmdLen] = 0; cmdLen = 0; runCmd(cmdBuf); out("\n"); }
+    } else if (cmdLen < sizeof cmdBuf - 1) cmdBuf[cmdLen++] = ch;
+  }
+  if (pending) { pending = false; runCmd(pendingCmd); out("\n"); }
+  delay(2);
+}
