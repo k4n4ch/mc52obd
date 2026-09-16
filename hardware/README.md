@@ -6,7 +6,7 @@ CB250R / MC52 の K-Line を ELM327 を介さず直接叩き、**噴射時間**�
 
 - 回路図: EasyEDA Pro のプロジェクト `MC52 KLine Logger`（ローカル、未公開）
 - 部品表: [`bom.csv`](bom.csv)
-- ネットリスト: [`netlist.md`](netlist.md)（読みやすい形）/ [`netlist.enet`](netlist.enet)（EasyEDA 出力）
+- ネットリスト: [`netlist.md`](netlist.md)（読みやすい形）/ [`Net_List.enet`](Net_List.enet)（EasyEDA 出力）
 - 生成に使ったスクリプトは `work/easyeda/`（リポジトリ外）
 
 **現状は回路図と PCB の部品配置まで。配線が残っている。** 詳細は末尾の「残っている工程」。
@@ -21,8 +21,8 @@ CB250R / MC52 の K-Line を ELM327 を介さず直接叩き、**噴射時間**�
 | 干渉検査 | `getPrimitivesBBox()` の**本体外形**で検査。重なり・基板外・取付穴との干渉すべて無し |
 | 配置図 | [`layout.png`](layout.png)。`J3` は部品を載せないので図に出ない |
 | **配線** | **未実施** |
-| BOM | [`bom.csv`](bom.csv)（在庫つき）/ [`bom_easyeda.tsv`](bom_easyeda.tsv)（EasyEDA 出力）。18 品種で一致 |
-| 実装座標 | [`cpl.tsv`](cpl.tsv)。**配線前の暫定値** |
+| BOM | [`bom.csv`](bom.csv)（在庫つき）/ [`Export_BOM.csv`](Export_BOM.csv)（EasyEDA 出力）。18 品種で一致 |
+| 実装座標 | [`Pick_Place`](Pick_Place)（EasyEDA 出力）/ [`jlc_cpl.csv`](jlc_cpl.csv)（JLCPCB へ出した 24 部品） |
 | ガーバー | 出力は通るが未配線なので発注不可。リポジトリに置いていない |
 
 ## 電源を 1 系統にした（設計変更）
@@ -534,7 +534,7 @@ BOM と座標の参照名が一致することを `mkjlc.py` が確認する。
 
 - **回路図 → PCB の転送は API では効かない。** 本書の PCB は `importChanges` を
   使わず、**同じネット定義から PCB 側の部品とパッドを直接生成**して作った。
-  結果は転送したものと等価になる（`netlist.enet` で確認できる）
+  結果は転送したものと等価になる（`Net_List.enet` で確認できる）
 - **enum は実行文脈に無い。** `EPCB_LayerId.TOP` と書くと `is not defined` に
   なるので、数値（TOP=1、MULTI=12、BOARD_OUTLINE=11）で渡す必要がある
 
@@ -574,7 +574,7 @@ ESP32 の間に**分圧抵抗 2 本ぶんのパターン（通常は 0Ω と未�
 **3. 製造データの出し直し**
 
 BOM・実装座標・ガーバーの書き出しは**すでに動作を確認済み**（`work/easyeda/export_mfg.py`）。
-配線が終わったら同じ手順で出し直す。現在置いてある `cpl.tsv` は配線前の暫定値で、
+配線が終わったら同じ手順で出し直す。当時置いていた `cpl.tsv` は配線前の暫定値で、
 配置を動かせば変わる。
 
 **発注（`placePcbOrder()` / `placeSmtComponentsOrder()` 等）は行っていない。**
