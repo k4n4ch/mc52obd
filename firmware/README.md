@@ -224,7 +224,7 @@ CRF の 4 つは先頭バイトの誤記と判定して補正、CBR の 2 つは
 ### 標準 OBD 層（`o`）—— 足場
 
 ISO 14230-4 KWP **FAST** / 10400bps / テスタ `0xF1` / ECU `0x10`。
-仕様は Track A（ELM327）の実測から（[`../FINDINGS.md`](../FINDINGS.md)「通信の同定」）。
+仕様は Track A（ELM327）の実測から（[`../docs/FINDINGS.md`](../docs/FINDINGS.md)「通信の同定」）。
 
 fast init（25ms Low → 25ms High → StartCommunication）の後、`0C` と `0D` を
 交互に読んでシリアルへ出す。K ラインは単線半二重なので**自分の送信がエコーで返る**。

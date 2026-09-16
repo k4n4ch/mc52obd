@@ -2,7 +2,7 @@
 
 車載マウントで走行中に見ることを前提にした単一ファイルの Web アプリ。
 何ができるかと使い方は [README](../README.md)、ギヤ判定と車速補正は
-[ギヤ判定と車速補正](gear.md)、実測の根拠は [FINDINGS.md](../FINDINGS.md)。
+[ギヤ判定と車速補正](gear.md)、実測の根拠は [FINDINGS.md](FINDINGS.md)。
 
 ## 画面
 
