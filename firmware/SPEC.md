@@ -381,6 +381,8 @@ flowchart TB
 | `rec` の入切 | **RAM。再起動で切に戻る**（記録は自動再開しない） |
 | `poll` の設定 | RAM。再起動で停止 |
 | keep-alive | RAM。`w` で入り、`poll` 中は止まる |
+| `auto` の設定 | **NVS に残る。** 起動時に `w` → `rec on` → `poll` を自動で走らせる |
+| `auto` の連番 | NVS。ファイル名 `auto0001.bin` … に使う |
 | OTA | RAM。**再起動で切** |
 | 壁時計 | RAM。**再起動で消える。** BLE 接続時に Mac から自動送信される |
 

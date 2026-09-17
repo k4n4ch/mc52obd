@@ -130,6 +130,9 @@ static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
 
 // ── 状態 ─────────────────────────────────────────────────
 static bool keepOn = false;
+/* **独自層を起こしたかどうか。** 標準層とセッションが排他で、w の後は o が必ず
+ * 無応答になる（2026-09-17 実測）。解除コマンドは未知なので電源を入れ直すしかない。 */
+static bool propUp = false;
 static uint32_t lastKeep = 0;
 static uint8_t keepFrame[8] = {0x72, 0x05, 0x71, 0x00, 0x18};  // CBR600RR はテーブル 0x00 を約 2 秒周期
 static size_t keepLen = 5;
@@ -165,7 +168,7 @@ static void cmdPropInit() {
       dump("  init 応答 ", r, n);
       outf("  **独自層が応答した**（ウェイクアップ %s）%s\n", v ? "B" : "A",
            csOk2c(r, n) ? "" : "  ※ CS 不一致");
-      keepOn = true; lastKeep = millis();
+      keepOn = true; propUp = true; lastKeep = millis();
       return;
     }
     outf("  無応答\n");
@@ -191,22 +194,30 @@ static void cmdScan() {
   if (!ok) out("**1 つも応答しない。喋らないか、ウェイクアップが違う**\n");
 }
 
-/* 0xD1 の index 4 が噛み合い状態。位置は 2 系統で裏が取れているが、
- * **値の対応は CBR600RR 側の記述のみで MC52 では未検証。**
- * ギヤを入れてクラッチを握った状態で 0x01 を返すかどうかが、比推定の
- * クラッチ切り誤判定を潰せるかの分かれ目になる。 */
+/* **2026-09-17 に実車で確定した**（docs/FINDINGS.md「実車で叩いた結果」）。
+ * index4 は状態を A〜D ＋ 車体を転がしてのギヤ掃引で 3 値とも再現。
+ * index8 はエンジン状態で、2400〜2600rpm のしきい値なので rpm 以上の情報は無い。
+ * index9 は正体不明 —— エンジン運転中 × 1 速のときだけ 01 になり、エンジンを
+ * 切ってのギヤ掃引では 750 サンプルすべて 00 だった。 */
 static void showD1(const uint8_t *r, int n) {
-  if (n < 6) { out("  短すぎる\n"); return; }
-  uint8_t s = r[4];
-  outf("  index4 = 0x%02X  %s\n", s,
-       s == 0x00 ? "イン（段が入っている）" : s == 0x01 ? "ニュートラルまたはクラッチ"
-     : s == 0x03 ? "サイドスタンド" : "**未知の値**");
+  if (n < 11) { outf("  長さ %d。MC52 の 11 バイトに満たない\n", n); return; }
+  outf("  index4 = 0x%02X  %s\n", r[4],
+       r[4] == 0x00 ? "駆動が繋がっている（ギヤ＋クラッチ）"
+     : r[4] == 0x01 ? "繋がっていない（N かクラッチ切り）"
+     : r[4] == 0x03 ? "サイドスタンド" : "**未知の値**");
+  outf("  index8 = 0x%02X  %s\n", r[8],
+       r[8] == 0x00 ? "エンジン停止" : r[8] == 0x01 ? "運転（〜2500rpm）"
+     : r[8] == 0x05 ? "運転（2500rpm 超）" : "**未知の値**");
+  outf("  index9 = 0x%02X  **正体不明**（運転中 × 1 速でのみ 01）\n", r[9]);
   char b[256]; int p = snprintf(b, sizeof b, "  他 :");
-  for (int i = 5; i < n - 1 && p < (int)sizeof b - 12; i++) p += snprintf(b + p, sizeof b - p, " [%d]=%02X", i, r[i]);
+  for (int i = 5; i < n - 1 && p < (int)sizeof b - 12; i++)
+    if (i != 8 && i != 9) p += snprintf(b + p, sizeof b - p, " [%d]=%02X", i, r[i]);
   snprintf(b + p, sizeof b - p, "\n"); out(b);
 }
 
-/* 0x10 / 0x11 のセンサ群。**噴射時間は index 18-19**（CRF250L の実測記録）。
+/* 0x11 のセンサ群。**噴射時間は index 18-19**（CRF250L の実測記録）。
+ * **0x61 には当てない。** 同じ 25 バイト長だが MC52 では凍結データで、当てると
+ * RPM 0 / 電圧 1.5V / 車速 5km/h という嘘が出る（2026-09-17 実測）。
  * 単位・endian・スケールは不明なので両方の解釈を出す。
  * 停車でも空吹かしで動くので、位置と桁はここで取れる。 */
 static void showSensors(const uint8_t *r, int n) {
@@ -231,7 +242,8 @@ static void cmdTable(uint8_t t) {
   dump("", r, n);
   if (!csOk2c(r, n)) out("  ※ チェックサム不一致\n");
   if (t == 0xD1) showD1(r, n);
-  if (t == 0x10 || t == 0x11 || t == 0x61) showSensors(r, n);
+  if (t == 0x10 || t == 0x11) showSensors(r, n);
+  if (t == 0x61) out("  ※ 凍結データ。0x11 の配置は当てはまらない\n");
 }
 
 // 16 進の切り出しは下で定義するが、poll の引数解釈で使うので前方宣言する
@@ -326,6 +338,22 @@ static void cmdPoll(char *arg) {
   if (!keepOn) out("※ `w` で独自層を起こしていない。無応答が続くなら先に w\n");
 }
 
+/* **実在するテーブルを 1 回ずつ読む。** 2026-09-17 の走査で中身を返したのはこの 7 本
+ * （残る 249 本は長さ 5 の空応答）。`0x61` は凍結、`0x70` と `0x00` は静的、`0x20` と
+ * `0xD0` は未同定のアナログ量なので、周期読みには入れず**走行の前後にこれを 1 回**打って
+ * 変化の有無だけ見る。1 本 100ms なので約 0.7 秒。 */
+static const uint8_t SNAP[] = {0x00, 0x11, 0x20, 0x61, 0x70, 0xD0, 0xD1};
+static void cmdSnap() {
+  out("-- 実在テーブルのスナップショット --\n");
+  uint8_t r[192];
+  for (uint8_t t : SNAP) {
+    int n = readTable(t, r, sizeof r, 200);
+    if (n <= 0) { outf("  %02X 応答なし\n", t); continue; }
+    char tag[16]; snprintf(tag, sizeof tag, "  %02X %s", t, csOk2c(r, n) ? "  " : "★ ");
+    dump(tag, r, n);
+  }
+}
+
 /* 標準 OBD 層。ELM327 で既に取れているものの再現で、**足場**。
  * ここが通れば UART・タイミング・エコー処理が正しいと分かり、独自層が
  * 無反応だったときに「実装が悪いのか MC52 が喋らないのか」を切り分けられる。 */
@@ -358,6 +386,13 @@ static void cmdLoop() {
 static void cmdObd() {
   static const uint8_t IN[5] = {0xC1, 0x33, 0xF1, 0x81, 0x66};
   uint8_t r[64];
+  /* **w の後は必ず無応答になる**（2026-09-17 実測）。keep-alive を切っても戻らず、
+   * 独自層を解除するコマンドは未知。待つだけ無駄なので手前で止める。 */
+  if (propUp) {
+    out("**独自層のセッションが張られている。標準層は無応答になる。**\n"
+        "  電源を入れ直して、w の前に o を打つこと（ka 0 では戻らない）\n");
+    return;
+  }
   keepOn = false;
   out("-- 標準 OBD 層（ISO 14230-4 KWP FAST）--\n");
   klBreak(25, 25);
@@ -626,14 +661,17 @@ static void help() {
       "[独自層] 本命。ELM327 では原理的に叩けない層\n"
       "  w           初期化（70ms ブレーク → ウェイクアップ 2 種）\n"
       "  s           テーブル 0x00〜0xFF 総当たり ★ 最初にやること\n"
-      "  d           0xD1（index4 = 噛み合い状態）\n"
-      "  m           0x11 → 0x10（センサ群。index18-19 が噴射時間か）\n"
+      "  d           0xD1（index4 = 駆動が繋がっているか / index8 エンジン状態）\n"
+      "  m           0x11（センサ群。index18-19 が噴射時間）\n"
       "  t <XX>      任意のテーブルを 1 回読む\n"
       "  ka <0|1>    keep-alive の入切（既定は w で入る）\n"
       "[実時間] 生バイトを機械可読な行で押し出す。解釈は Mac 側（klwatch.py）\n"
       "  poll <TT..> [ms]    そのテーブルを周期読みして P 行で流す（既定 200ms）\n"
       "                      BLE が切れても止まらない。rec と併用すると記録も残る\n"
       "  poll off            停止   poll だけで現在の状態\n"
+      "  snap                実在 7 テーブルを 1 回ずつ（走行の前後に。約 0.7 秒）\n"
+      "  auto on [引数]      **キーを回したら自動で w → rec on → poll**（NVS に残る）\n"
+      "  auto off            解除   auto だけで状態\n"
       "[標準層] 足場。ELM327 で既に取れているもの\n"
       "  o           fast init して 0C / 0D を読む\n"
       "[物理層]\n"
@@ -651,7 +689,67 @@ static void help() {
       "[その他]\n"
       "  time <unix> 壁時計を合わせる（GPS ログとの突き合わせに要る）\n"
       "  ?           この一覧\n"
-      "出所と信頼度は PROVENANCE.md。**MC52 では全部未検証。**\n");
+      "前提の検証状況は SPEC.md §13、実測は ../docs/FINDINGS.md\n");
+}
+
+/* ── 自動開始（実用フェーズ） ──────────────────────────────
+ * **キーを回したら記録が始まる。** `rec` も `poll` も RAM なのでキーオフで消え、
+ * 走行前にバイクの横で Mac もスマホも出せない状況では引き金が無い。NVS のフラグで、
+ * 起動時に `w` → `rec on` → `poll` までを自分でやる。
+ *
+ * **保存するのは poll の引数文字列そのまま。** 解釈は cmdPoll に任せるので二重の
+ * パーサを持たない。
+ *
+ * **壁時計は入らない**（RTC が無い）。ファイル名は NVS の連番にする。絶対時刻は
+ * スマホが接続したときに入る想定で、GPS との突合はスマホの時計に乗った測位ログと
+ * 合わせる。**車速バイトの校正には GPS が要る**ので、走行時はスマホが前提になる。 */
+static void cmdAuto(char *arg) {
+  prefs.begin("mc52", false);
+  if (!*arg) {
+    outf("自動開始 %s（poll %s、次の連番 %d）\n",
+         prefs.getInt("au", 0) ? "**入**" : "切",
+         prefs.getString("ap", "D1 11 200").c_str(), prefs.getInt("aseq", 0) + 1);
+    out("  auto on [テーブル.. 周期ms]  /  auto off\n");
+    prefs.end(); return;
+  }
+  if (!strncmp(arg, "off", 3) || *arg == '0') {
+    prefs.putInt("au", 0); prefs.end(); out("自動開始 切\n"); return;
+  }
+  if (!strncmp(arg, "on", 2)) {
+    char *p = arg + 2; while (*p == ' ') p++;
+    if (*p) prefs.putString("ap", p);
+    prefs.putInt("au", 1);
+    outf("自動開始 **入**。次の起動で w → rec on → poll %s\n",
+         prefs.getString("ap", "D1 11 200").c_str());
+    prefs.end(); return;
+  }
+  prefs.end();
+  out("auto on [テーブル.. 周期ms]  /  auto off  /  auto（状態）\n");
+}
+
+static void autoStart() {
+  prefs.begin("mc52", true);
+  bool on = prefs.getInt("au", 0) != 0;
+  String pollArg = prefs.getString("ap", "D1 11 200");
+  int seq = prefs.getInt("aseq", 0) + 1;
+  prefs.end();
+  if (!on) return;
+  outf("\n**自動開始が有効。** poll %s\n", pollArg.c_str());
+  delay(2000);                     // ECU 側の立ち上がりを待つ
+  for (int i = 0; i < 3 && !propUp; i++) {
+    cmdPropInit();
+    if (!propUp) delay(1500);
+  }
+  prefs.begin("mc52", false); prefs.putInt("aseq", seq); prefs.end();
+  char name[32]; snprintf(name, sizeof name, "auto%04d", seq);
+  cmdRec(name);
+  char note[96];
+  int nl = snprintf(note, sizeof note, "auto seq=%d prop=%s", seq, propUp ? "ok" : "FAIL");
+  logRec(T_NOTE, (const uint8_t *)note, nl);
+  if (!propUp)
+    out("**独自層が起きない。** 記録は続けるが応答は入らない（要求だけ残る）\n");
+  char cmd[64]; strncpy(cmd, pollArg.c_str(), sizeof cmd - 1); cmd[sizeof cmd - 1] = 0;
+  cmdPoll(cmd);
 }
 
 static void runCmd(char *line) {
@@ -663,8 +761,10 @@ static void runCmd(char *line) {
   if (!strcmp(line, "w")) { cmdPropInit(); return; }
   if (!strcmp(line, "s")) { cmdScan(); return; }
   if (!strcmp(line, "d")) { cmdTable(0xD1); return; }
-  if (!strcmp(line, "m")) { cmdTable(0x11); cmdTable(0x10); return; }
+  if (!strcmp(line, "m")) { cmdTable(0x11); return; }   // 0x10 は MC52 に存在しない
   if (!strcmp(line, "poll")) { cmdPoll(arg); return; }
+  if (!strcmp(line, "snap")) { cmdSnap(); return; }
+  if (!strcmp(line, "auto")) { cmdAuto(arg); return; }
   if (!strcmp(line, "o")) { cmdObd(); return; }
   if (!strcmp(line, "k")) { cmdLoop(); return; }
   if (!strcmp(line, "rec")) { cmdRec(arg); return; }
@@ -760,6 +860,7 @@ void setup() {
 
   help();
   out("BLE: MC52-explore として広告中\n");
+  autoStart();        // NVS のフラグが立っていれば、ここで記録が始まる
 }
 
 void loop() {
