@@ -62,6 +62,7 @@
 | `tools/kllog.py` | ログの吸い出しと CRC32 検算。既定の出力先は `private/logs` |
 | `tools/kldecode.py` | レコード分解・時刻復元・チェックサム検算・CSV 出力 |
 | `tools/klota.py` | BLE で `ota on` → IP を拾って焼く |
+| `rec.html` | **走行の記録を仕込むスマホページ**（Android Chrome / Web Bluetooth）。壁時計を入れる・記録を開始する・測位を端末の時計で残す、の 3 つだけ。**Pixel から接続まで確認済み**（2026-09-17）。記録開始・測位・書き出しは未確認 |
 | `tools/bletest.py` | BLE の疎通確認 |
 | `tools/mkjlc.py` | EasyEDA の書き出しを JLCPCB の BOM / 実装座標に変換 |
 
