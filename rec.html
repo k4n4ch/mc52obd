@@ -1,0 +1,369 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CB250R 記録</title>
+<!--
+  走行の記録を仕込むための最小ページ。**Android Chrome（Web Bluetooth）前提。**
+
+  基板（MC52-explore）は BLE が切れても poll と rec を回し続けるので、**このページの
+  仕事は 3 つだけ**。
+
+    1. 基板に壁時計を入れる（基板に RTC が無い。GPS ログとの突合に要る）
+    2. 記録を開始する（rec と poll は RAM なのでキーオフで消える）
+    3. **測位ログを端末の時計で残す**
+
+  3 が要るのは、独自層の車速バイトの校正に GPS しか使えないため —— 標準層の `0D` は
+  セッションが排他で同じ走行では読めない（`docs/FINDINGS.md`）。基板の時計もこのページが
+  入れるので、**両方のログが同じ時間軸に乗る**。
+
+  **接続が切れても走行の記録は続く。** 切れて困るのは測位ログだけなので、画面を
+  点けたままにする（Screen Wake Lock）。
+
+  解釈は一切しない。生の hex と、接続してから動いたバイトを強調するだけ。バイト配置が
+  未確定なので、意味付けを画面に焼くと外れたときに嘘になる。
+-->
+<style>
+:root{
+  --bg:#07090d; --panel:#11151c; --line:#232b38;
+  --fg:#e8eef7; --dim:#7d8899; --accent:#4da3ff;
+  --ok:#38d977; --warn:#ffb020; --bad:#ff4d5e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg); min-height:100%;
+  font-family:-apple-system,"Helvetica Neue",Roboto,sans-serif;
+  font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
+  padding:env(safe-area-inset-top) .6rem calc(env(safe-area-inset-bottom) + .6rem);
+}
+h1{font-size:.95rem;font-weight:600;padding:.6rem 0 .4rem}
+h1 span{color:var(--dim);font-weight:400;font-size:.72rem;margin-left:.4rem}
+#status{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.6rem}
+.chip{display:flex;align-items:center;gap:.3rem;padding:.2rem .5rem;border-radius:999px;
+  background:var(--panel);border:1px solid var(--line);color:var(--dim);font-size:.72rem}
+.chip.on{color:var(--fg);border-color:var(--accent)}
+.chip.rec{color:#fff;background:#7a1220;border-color:var(--bad)}
+.dot{width:.5rem;height:.5rem;border-radius:50%;background:#39414f}
+.chip.on .dot{background:var(--ok)}
+.chip.rec .dot{background:var(--bad);animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:.25}}
+.row{display:flex;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap}
+button{
+  flex:1 1 auto;min-height:2.9rem;min-width:6.5rem;
+  background:var(--panel);color:var(--fg);border:1px solid var(--line);
+  border-radius:.5rem;font-size:.85rem;font-family:inherit}
+button:disabled{opacity:.35}
+button.primary{border-color:var(--accent);color:var(--accent)}
+button.danger{border-color:var(--bad);color:var(--bad)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:.5rem;
+  padding:.5rem .6rem;margin-bottom:.6rem}
+section h2{font-size:.72rem;color:var(--dim);font-weight:600;margin-bottom:.35rem}
+.frame{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;line-height:1.5;
+  word-break:break-all}
+.frame b{color:var(--warn);font-weight:600}
+.frame i{color:var(--dim);font-style:normal}
+#log{font-family:ui-monospace,Menlo,monospace;font-size:.66rem;line-height:1.45;
+  white-space:pre-wrap;word-break:break-all;max-height:11rem;overflow-y:auto;color:var(--dim)}
+input{width:100%;background:#0c1016;color:var(--fg);border:1px solid var(--line);
+  border-radius:.4rem;padding:.55rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}
+.note{font-size:.68rem;color:var(--dim);line-height:1.5}
+#restore{border-color:var(--warn)}
+</style>
+
+<h1>CB250R 記録<span id="ver"></span></h1>
+
+<div id="status">
+  <div class="chip" id="cBle"><i class="dot"></i><span>未接続</span></div>
+  <div class="chip" id="cRec"><i class="dot"></i><span>記録なし</span></div>
+  <div class="chip" id="cGps"><i class="dot"></i><span>測位なし</span></div>
+  <div class="chip" id="cFrm"><i class="dot"></i><span>0 フレーム</span></div>
+</div>
+
+<div class="row">
+  <button id="bConn" class="primary">基板に接続</button>
+  <button id="bStart" disabled>記録開始</button>
+  <button id="bStop" class="danger" disabled>記録停止</button>
+</div>
+<div class="row">
+  <button id="bSnap" disabled>snap（走行前後）</button>
+  <button id="bExport" disabled>測位を書き出す</button>
+</div>
+
+<section id="restore" hidden>
+  <h2>前回の測位データが残っている</h2>
+  <div class="note" id="restoreInfo"></div>
+  <div class="row" style="margin-top:.4rem">
+    <button id="bRestoreExp">書き出す</button>
+    <button id="bRestoreDel" class="danger">捨てる</button>
+  </div>
+</section>
+
+<section>
+  <h2>生フレーム（接続してから動いたバイトを強調）</h2>
+  <div class="frame" id="frames"><i>まだ来ていない</i></div>
+</section>
+
+<section>
+  <h2>基板の出力</h2>
+  <div id="log"></div>
+</section>
+
+<section>
+  <h2>コマンド（そのまま基板へ）</h2>
+  <input id="cmd" placeholder="? / snap / ls / df / t D1" autocapitalize="off"
+         autocomplete="off" spellcheck="false">
+  <div class="note" style="margin-top:.4rem">
+    <b>wifi のパスワードはここに打たない。</b>画面に残る。設定は Mac 側から。
+  </div>
+</section>
+
+<section>
+  <div class="note">
+    接続が切れても<b>基板は記録を続ける</b>（poll も rec も BLE 非依存）。
+    切れて困るのは測位ログだけなので、画面は点けたままにしている。<br>
+    帰ったら Mac で <code>tools/kllog.py get --all</code>。
+  </div>
+</section>
+
+<script>
+const VERSION = 'v20260917a';
+document.getElementById('ver').textContent = VERSION;
+
+const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';   // こちら → 基板
+const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';   // 基板 → こちら
+const LS_KEY = 'mc52-gps';
+
+let dev = null, rxChar = null, txChar = null;
+let frames = 0;
+const tables = new Map();        // TT -> {cur:[], seen:[Set], len}
+let pts = [];                    // 測位ログ
+let watchId = null, wakeLock = null, recOn = false;
+
+/* **逐次デコーダが要る。** 基板は notify の上限に収まるようバイト数で刻むので、
+   UTF-8 の多バイト文字が区切りをまたぐ。通知ごとに decode すると日本語が化ける
+   （Mac 側の klconsole.py で実機確認した不具合と同じ）。 */
+const dec = new TextDecoder('utf-8');
+let rxBuf = '';
+
+const $ = id => document.getElementById(id);
+function chip(el, on, text, cls) {
+  el.className = 'chip' + (on ? (cls ? ' ' + cls : ' on') : '');
+  el.querySelector('span').textContent = text;
+}
+function say(s) {
+  const l = $('log');
+  l.textContent = (l.textContent + s).split('\n').slice(-60).join('\n');
+  l.scrollTop = l.scrollHeight;
+}
+
+// ── BLE ───────────────────────────────────────────────
+async function connect() {
+  if (!navigator.bluetooth) {
+    say('この端末では Web Bluetooth が使えない（iOS は非対応）。Android Chrome で開く\n');
+    return;
+  }
+  try {
+    // **filters にサービス UUID を入れる。** optionalServices だけだと触れない。
+    // 名前で探さないのは、OS 側が古い名前をキャッシュすることがあるため
+    dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    dev.addEventListener('gattserverdisconnected', () => {
+      chip($('cBle'), false, '切断');
+      $('bStart').disabled = $('bStop').disabled = $('bSnap').disabled = true;
+      say('\n[BLE 切断。基板の記録は続いている]\n');
+    });
+    const srv = await (await dev.gatt.connect()).getPrimaryService(SVC);
+    rxChar = await srv.getCharacteristic(RX);
+    txChar = await srv.getCharacteristic(TX);
+    await txChar.startNotifications();
+    txChar.addEventListener('characteristicvaluechanged', e => feed(e.target.value));
+    chip($('cBle'), true, dev.name || '接続');
+    $('bStart').disabled = $('bStop').disabled = $('bSnap').disabled = false;
+    // **接続したら壁時計を入れる。** 基板に RTC が無いので、これをやらないと
+    // 記録した時刻を測位ログと突き合わせられない
+    await send('time ' + Math.floor(Date.now() / 1000));
+  } catch (e) {
+    say('接続できない: ' + e.message + '\n');
+  }
+}
+
+async function send(text) {
+  if (!rxChar) return;
+  const b = new TextEncoder().encode(text + '\n');
+  for (let i = 0; i < b.length; i += 180) {          // 1 回の write を MTU 内に収める
+    await rxChar.writeValueWithoutResponse(b.slice(i, i + 180));
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+
+function feed(v) {
+  rxBuf += dec.decode(v, { stream: true });
+  let i;
+  while ((i = rxBuf.indexOf('\n')) >= 0) {
+    const line = rxBuf.slice(0, i).replace(/\r$/, '');
+    rxBuf = rxBuf.slice(i + 1);
+    if (line.startsWith('P ')) onFrame(line);
+    else if (line.trim()) say(line + '\n');
+  }
+}
+
+/* P 行は解釈しない。バイトを並べて、接続してから 2 種類以上の値を取ったものだけ強調する。
+   種類 1 = 定数、2 = 旗、多い = 量。意味付けを画面に焼かないので後から間違いにならない。 */
+function onFrame(line) {
+  const f = line.split(' ');
+  if (f.length < 4) return;
+  const tt = f[2];
+  frames++;
+  if (f[3] === '-') { chip($('cFrm'), true, frames + ' フレーム'); return; }
+  const by = f.slice(3);
+  let t = tables.get(tt);
+  if (!t) { t = { cur: [], seen: [] }; tables.set(tt, t); }
+  t.cur = by;
+  by.forEach((h, k) => { (t.seen[k] ||= new Set()).add(h); });
+  chip($('cFrm'), true, frames + ' フレーム');
+  render();
+}
+
+let renderAt = 0, renderTimer = null;
+function render() {
+  // **間引くが捨てない。** 単に return すると、フレームが途切れた瞬間の状態が
+  // 永久に描かれない（jsdom で最初のサンプルのまま止まるのを確認した）
+  const dt = Date.now() - renderAt;
+  if (dt < 250) {
+    if (!renderTimer) renderTimer = setTimeout(() => { renderTimer = null; render(); }, 250 - dt);
+    return;
+  }
+  renderAt = Date.now();
+  const out = [];
+  for (const [tt, t] of tables) {
+    const hex = t.cur.map((h, k) =>
+      (t.seen[k] && t.seen[k].size > 1) ? '<b>' + h + '</b>' : h).join(' ');
+    out.push('<i>' + tt + '</i> ' + hex);
+  }
+  $('frames').innerHTML = out.join('<br>') || '<i>まだ来ていない</i>';
+}
+
+// ── 記録 ──────────────────────────────────────────────
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  // **ファイル名に端末の時刻を焼く。** 基板は電源を切ると時計を失うので、
+  // 名前が絶対時刻の手掛かりとして残る
+  return 'r' + String(d.getFullYear()).slice(2) + p(d.getMonth() + 1) + p(d.getDate())
+       + '_' + p(d.getHours()) + p(d.getMinutes());
+}
+
+async function startRec() {
+  $('bStart').disabled = true;
+  say('\n[記録開始]\n');
+  await send('w');                                   // 独自層を起こす
+  await new Promise(r => setTimeout(r, 3000));
+  await send('rec on ' + stamp());
+  await new Promise(r => setTimeout(r, 600));
+  await send('poll D1 11 200');
+  recOn = true;
+  chip($('cRec'), true, '記録中', 'rec');
+  await startGps();
+}
+
+async function stopRec() {
+  say('\n[記録停止]\n');
+  await send('poll off');
+  await new Promise(r => setTimeout(r, 600));
+  await send('rec off');
+  recOn = false;
+  chip($('cRec'), false, '記録なし');
+  $('bStart').disabled = false;
+  stopGps();
+}
+
+// ── 測位 ──────────────────────────────────────────────
+async function startGps() {
+  if (watchId !== null) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* 無くても動く */ }
+  watchId = navigator.geolocation.watchPosition(p => {
+    pts.push({
+      t: p.timestamp,                                // **端末の時計。基板もこれに合わせた**
+      lat: +p.coords.latitude.toFixed(7),
+      lon: +p.coords.longitude.toFixed(7),
+      alt: p.coords.altitude == null ? null : +p.coords.altitude.toFixed(1),
+      spd: p.coords.speed == null ? null : +p.coords.speed.toFixed(2),
+      acc: p.coords.accuracy == null ? null : +p.coords.accuracy.toFixed(1),
+    });
+    chip($('cGps'), true, pts.length + ' 点 ±' + Math.round(p.coords.accuracy) + 'm');
+    $('bExport').disabled = false;
+    save();
+  }, e => say('測位エラー: ' + e.message + '\n'),
+     { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+}
+
+function stopGps() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
+let saveAt = 0;
+function save() {
+  if (Date.now() - saveAt < 10000) return;           // **10 秒ごとに保険をかける**
+  saveAt = Date.now();
+  try { localStorage.setItem(LS_KEY, JSON.stringify(pts)); } catch (e) { /* 満杯でも走行は続ける */ }
+}
+
+function dl(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function exportPts(arr) {
+  if (!arr.length) return;
+  const iso = t => new Date(t).toISOString();
+  const csv = 'iso_time,epoch_ms,lat,lon,alt_m,speed_mps,acc_m\n' + arr.map(p =>
+    [iso(p.t), p.t, p.lat, p.lon, p.alt ?? '', p.spd ?? '', p.acc ?? ''].join(',')).join('\n');
+  const gpx = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<gpx version="1.1" creator="mc52obd rec.html"'
+    + ' xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>\n'
+    + arr.map(p => '<trkpt lat="' + p.lat + '" lon="' + p.lon + '">'
+        + (p.alt == null ? '' : '<ele>' + p.alt + '</ele>')
+        + '<time>' + iso(p.t) + '</time></trkpt>').join('\n')
+    + '\n</trkseg></trk></gpx>\n';
+  const base = 'gps_' + iso(arr[0].t).replace(/[:.]/g, '').slice(0, 15);
+  dl(base + '.csv', csv, 'text/csv');
+  setTimeout(() => dl(base + '.gpx', gpx, 'application/gpx+xml'), 400);
+}
+
+// ── 配線 ──────────────────────────────────────────────
+$('bConn').onclick = connect;
+$('bStart').onclick = startRec;
+$('bStop').onclick = stopRec;
+$('bSnap').onclick = () => send('snap');
+$('bExport').onclick = () => exportPts(pts);
+$('cmd').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const v = e.target.value.trim();
+  if (!v) return;
+  say('> ' + v + '\n');
+  send(v);
+  e.target.value = '';
+});
+
+// 前回のデータが残っていたら拾えるようにする（ページが落ちても失わない）
+try {
+  const old = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+  if (old.length) {
+    $('restore').hidden = false;
+    $('restoreInfo').textContent =
+      old.length + ' 点 / ' + new Date(old[0].t).toLocaleString();
+    $('bRestoreExp').onclick = () => exportPts(old);
+    $('bRestoreDel').onclick = () => {
+      localStorage.removeItem(LS_KEY); $('restore').hidden = true;
+    };
+  }
+} catch (e) { /* 壊れていたら無視する */ }
+
+// 復帰したら画面ロックを取り直す（記録中だけ）
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && recOn && !wakeLock) {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+});
+</script>
