@@ -555,8 +555,9 @@ static void cmdRec(const char *argIn) {
    * 転送の BEGIN 行が空白区切りなので、名前に入ると解析が壊れる。 */
   char tmp[64]; strncpy(tmp, argIn, sizeof tmp - 1); tmp[sizeof tmp - 1] = 0;
   char *arg = tmp;
+  bool sawOn = false;
   if (!strncmp(arg, "on", 2) && (arg[2] == 0 || arg[2] == ' ')) {
-    arg += 2; while (*arg == ' ') arg++;
+    sawOn = true; arg += 2; while (*arg == ' ') arg++;
   }
   for (char *p = arg; *p; p++) if (*p == ' ') *p = '_';
   if (!strncmp(arg, "off", 3) || *arg == '0') {
@@ -565,7 +566,15 @@ static void cmdRec(const char *argIn) {
     outf("停止。%lu レコード / %lu バイト\n", (unsigned long)logRecs, (unsigned long)logBytes);
     return;
   }
-  if (recOn) { outf("記録中（%lu レコード）\n", (unsigned long)logRecs); return; }
+  if (recOn) {
+    outf("記録中 %s（%lu レコード / %lu バイト）\n",
+         logFile ? logFile.name() : "?", (unsigned long)logRecs, (unsigned long)logBytes);
+    return;
+  }
+  /* **引数なしの `rec` で記録を始めない。** 状態確認のつもりで打つと黙って
+   * 新しいファイルができる（実際に 0 バイトのゴミを作った）。開始は `rec on` を
+   * 明示したときだけにする。 */
+  if (!sawOn && !*arg) { out("記録していない。rec on [名前] で開始\n"); return; }
   char name[48];
   time_t t = time(nullptr);
   if (*arg) snprintf(name, sizeof name, "/%s.bin", arg);
@@ -678,6 +687,7 @@ static void help() {
       "  k           K ライン折り返し（車両に挿していない状態で。配線の検証）\n"
       "[記録] 生フレームを LittleFS へ追記。復号は Mac 側\n"
       "  rec on [名前]       記録開始（名前を省くと日時）   rec off  停止\n"
+      "  rec                 状態だけ（引数なしでは開始しない）\n"
       "  ls / df / rm <名前> 一覧 / 空き / 削除\n"
       "  get <名前>          BLE で吸い出す（base64 ＋ CRC32）\n"
       "  note <文字列>       ログに目印を入れる\n"
