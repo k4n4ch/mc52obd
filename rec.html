@@ -66,6 +66,14 @@ input{width:100%;background:#0c1016;color:var(--fg);border:1px solid var(--line)
   border-radius:.4rem;padding:.55rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}
 .note{font-size:.68rem;color:var(--dim);line-height:1.5}
 #restore{border-color:var(--warn)}
+details{font-size:.72rem}
+details+details{margin-top:.5rem}
+summary{color:var(--accent);cursor:pointer;padding:.15rem 0;font-weight:600}
+.steps{margin:.4rem 0 .1rem 1.1rem;color:var(--dim);line-height:1.6}
+.steps li{margin-bottom:.35rem}
+.steps b{color:var(--fg)}
+code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
+  background:#0c1016;border:1px solid var(--line);border-radius:.2rem;padding:0 .2rem}
 </style>
 
 <h1>CB250R 記録<span id="ver"></span></h1>
@@ -116,11 +124,39 @@ input{width:100%;background:#0c1016;color:var(--fg);border:1px solid var(--line)
 </section>
 
 <section>
-  <div class="note">
-    接続が切れても<b>基板は記録を続ける</b>（poll も rec も BLE 非依存）。
-    切れて困るのは測位ログだけなので、画面は点けたままにしている。<br>
-    帰ったら Mac で <code>tools/kllog.py get --all</code>。
-  </div>
+  <details>
+    <summary>操作手順</summary>
+    <ol class="steps">
+      <li><b>キー ON → エンジン始動。</b>この順。記録設定は基板の RAM にあるので、
+        <b>始動のクランキングで再起動すると消える</b></li>
+      <li><b>「基板に接続」。</b>Chrome のデバイス選択が出る。接続した瞬間に
+        <b>壁時計が入る</b></li>
+      <li><b>「snap」を 1 回。</b>走行前のスナップショット</li>
+      <li><b>「記録開始」。</b>チップが赤い「記録中」になり、
+        <b>フレーム数が増えていく</b>のを確認する</li>
+      <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない。
+        画面は点けたままにしてある（測位を止めないため）</li>
+      <li><b>帰着したら、エンジンを切る前に「snap」→「記録停止」</b></li>
+      <li><b>「測位を書き出す」。</b>CSV と GPX が端末に落ちる</li>
+      <li>家で Mac から <code>tools/kllog.py get --all</code></li>
+    </ol>
+  </details>
+  <details>
+    <summary>押さえておくこと</summary>
+    <ul class="steps">
+      <li><b>「記録停止」を押さずにキーを切ると末尾 5 秒を失う</b>（書き出しが 5 秒周期）。
+        ファイルシステムは壊れないので、失うのは末尾だけ</li>
+      <li><b>基板側で <code>auto</code> を有効にしてあると、ファイル名が時刻にならない。</b>
+        キー ON の時点で既に記録中で、「記録開始」は新しいファイルを作らず既存に追記する。
+        時刻入りの名前にしたいなら<b>「記録停止」→「記録開始」</b>の順に押す。
+        スマホを持つ日は <code>auto</code> を切っておくのが素直</li>
+      <li><b>測位は走行の必須項目。</b>独自層の車速バイトの校正は GPS しか基準が無い
+        （標準層の <code>0D</code> はセッションが排他で同じ走行では読めない）。
+        取り忘れると走行 1 本が無駄になる</li>
+      <li>接続が切れても<b>基板は記録を続ける</b>（<code>poll</code> も <code>rec</code> も
+        BLE 非依存）。切れて困るのは測位ログだけ</li>
+    </ul>
+  </details>
 </section>
 
 <script>
