@@ -24,162 +24,199 @@
   バイト配置の理解が外れても間違いにならない性質を保ってある。
 -->
 <style>
+/* 計器のレイアウトは index.html を踏襲する。**3 段を同じ高さで並べて突出した主役を
+   作らない**配分と、**状態ボタンは効力が続いている間ずっと点灯**させる作り。 */
 :root{
   --bg:#07090d; --panel:#11151c; --line:#232b38;
   --fg:#e8eef7; --dim:#7d8899; --accent:#4da3ff;
-  --ok:#38d977; --warn:#ffb020; --bad:#ff4d5e;
+  --ok:#38d977; --warn:#ffb020; --bad:#ff4d5e; --mute:#5b6472;
 }
 *{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
 body{
-  background:var(--bg); color:var(--fg); min-height:100%;
+  background:var(--bg); color:var(--fg);
   font-family:-apple-system,"Helvetica Neue",Roboto,sans-serif;
   font-variant-numeric:tabular-nums; -webkit-text-size-adjust:100%;
-  padding:env(safe-area-inset-top) .6rem calc(env(safe-area-inset-bottom) + .6rem);
+  display:flex; flex-direction:column; overflow:hidden;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
-h1{font-size:.95rem;font-weight:600;padding:.6rem 0 .4rem}
-h1 span{color:var(--dim);font-weight:400;font-size:.72rem;margin-left:.4rem}
-#status{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.6rem}
-.chip{display:flex;align-items:center;gap:.3rem;padding:.2rem .5rem;border-radius:999px;
-  background:var(--panel);border:1px solid var(--line);color:var(--dim);font-size:.72rem}
-.chip.on{color:var(--fg);border-color:var(--accent)}
-.chip.rec{color:#fff;background:#7a1220;border-color:var(--bad)}
+#status{display:flex; gap:.5rem; align-items:center; padding:.35rem .6rem;
+  background:var(--panel); border-bottom:1px solid var(--line); font-size:.72rem; flex:0 0 auto}
+.chip{display:flex; align-items:center; gap:.28rem; padding:.16rem .45rem; border-radius:999px;
+  background:#0c1016; border:1px solid var(--line); color:var(--dim); white-space:nowrap}
+.chip.on{color:var(--fg); border-color:var(--accent)}
+.chip.rec{color:#fff; background:#7a1220; border-color:var(--bad)}
 .dot{width:.5rem;height:.5rem;border-radius:50%;background:#39414f}
 .chip.on .dot{background:var(--ok)}
-.chip.rec .dot{background:var(--bad);animation:blink 1s steps(1,end) infinite}
-@keyframes blink{50%{opacity:.25}}
-.row{display:flex;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap}
-button{
-  flex:1 1 auto;min-height:2.9rem;min-width:6.5rem;
-  background:var(--panel);color:var(--fg);border:1px solid var(--line);
-  border-radius:.5rem;font-size:.85rem;font-family:inherit}
+.chip.rec .dot{background:var(--bad); animation:blink 1s steps(1,end) infinite}
+@keyframes blink{50%{opacity:.15}}
+#ver{margin-left:auto; color:var(--mute); font-size:.66rem; white-space:nowrap}
+#hz{margin-left:.55rem; color:var(--dim); white-space:nowrap}
+
+#alert{flex:0 0 auto; display:none; padding:.5rem .7rem; font-size:.8rem; line-height:1.4;
+  background:#5c0f1b; border-bottom:1px solid var(--bad); color:#ffd9de}
+#alert.show{display:block}
+#alert.warn{background:#5a4310; border-color:var(--warn); color:#ffe9c2}
+#alert b{color:#fff}
+
+/* ── 計器 ───────────────────────────────────── */
+#gauges{flex:1 1 auto; display:grid; grid-template-rows:1fr 1fr 1fr auto;
+  gap:.4rem; padding:.4rem; min-height:0}
+.row{background:var(--panel); border:1px solid var(--line); border-radius:.5rem;
+  position:relative; display:flex; align-items:center; justify-content:center;
+  min-height:0; overflow:hidden}
+.row .lbl{position:absolute; top:.32rem; left:.6rem; font-size:.66rem; color:var(--dim); letter-spacing:.14em}
+.row .sub{position:absolute; bottom:.3rem; right:.6rem; font-size:.68rem; color:var(--dim)}
+.val{font-weight:700; line-height:.9; letter-spacing:-.02em; font-size:min(36vw,20vh)}
+#rpmbar{position:absolute; left:.5rem; right:.5rem; bottom:.4rem; height:.5rem;
+  background:#0c1016; border:1px solid var(--line); border-radius:999px; overflow:hidden}
+#rpmfill{height:100%; width:0%; transition:width .1s linear;
+  background:linear-gradient(90deg,#2a6fb8,#4da3ff 60%,#ffb020 82%,#ff4d5e 95%)}
+#secondary{flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem}
+.cell{background:var(--panel); border:1px solid var(--line); border-radius:.4rem;
+  padding:.32rem .2rem; text-align:center}
+.cell .lbl{font-size:.6rem; color:var(--dim); letter-spacing:.1em}
+.cell .val{font-size:clamp(1rem,5.4vw,1.6rem); font-weight:600; line-height:1.15}
+.cell.warn .val{color:var(--warn)} .cell.bad .val{color:var(--bad)}
+.stale{opacity:.42}
+
+/* ── 操作 ───────────────────────────────────── */
+#bar{flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem;
+  padding:.4rem; border-top:1px solid var(--line); background:var(--panel)}
+button{font:inherit; font-size:.8rem; font-weight:600; color:var(--fg);
+  background:#161c25; border:1px solid var(--line); border-radius:.4rem;
+  padding:.62rem .2rem; cursor:pointer; -webkit-tap-highlight-color:transparent}
+button:active{background:#202834}
 button:disabled{opacity:.35}
-button.primary{border-color:var(--accent);color:var(--accent)}
-button.danger{border-color:var(--bad);color:var(--bad)}
-section{background:var(--panel);border:1px solid var(--line);border-radius:.5rem;
-  padding:.5rem .6rem;margin-bottom:.6rem}
-section h2{font-size:.72rem;color:var(--dim);font-weight:600;margin-bottom:.35rem}
-.frame{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;line-height:1.5;
-  word-break:break-all}
-.frame b{color:var(--warn);font-weight:600}
-.frame i{color:var(--dim);font-style:normal}
-#log{font-family:ui-monospace,Menlo,monospace;font-size:.66rem;line-height:1.45;
-  white-space:pre-wrap;word-break:break-all;max-height:11rem;overflow-y:auto;color:var(--dim)}
-input{width:100%;background:#0c1016;color:var(--fg);border:1px solid var(--line);
-  border-radius:.4rem;padding:.55rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}
-.note{font-size:.68rem;color:var(--dim);line-height:1.5}
-#restore{border-color:var(--warn)}
-#mode{display:flex;gap:.3rem;margin-bottom:.6rem}
-#mode button{min-height:2.2rem;font-size:.75rem}
-#mode button.sel{border-color:var(--accent);color:var(--accent);background:#0d1725}
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
-.cell{background:#0c1016;border:1px solid var(--line);border-radius:.5rem;padding:.5rem .6rem}
-.cell .k{font-size:.66rem;color:var(--dim)}
-.cell .v{font-size:1.5rem;font-weight:600;line-height:1.25}
-.cell .u{font-size:.7rem;color:var(--dim);margin-left:.15rem}
-.cell.wide{grid-column:1/-1}
-.big{font-size:3.4rem;font-weight:700;line-height:1;text-align:center}
-.big.dim{color:var(--dim)}
-details{font-size:.72rem}
-details+details{margin-top:.5rem}
-summary{color:var(--accent);cursor:pointer;padding:.15rem 0;font-weight:600}
-.steps{margin:.4rem 0 .1rem 1.1rem;color:var(--dim);line-height:1.6}
+button.active{background:#12314f; border-color:var(--accent); color:#cfe6ff}
+button.rec.active{background:#5c0f1b; border-color:var(--bad); color:#ffd9de}
+
+/* ── 引き出し（ログ・副操作・説明） ───────────── */
+#drawer{flex:0 0 auto; height:0; overflow-y:auto; background:#05070a;
+  border-top:1px solid var(--line); font-size:.72rem; color:var(--dim); transition:height .15s}
+#drawer.open{height:52vh; padding:.5rem .6rem}
+#drawer h2{font-size:.66rem; color:var(--dim); letter-spacing:.1em; margin:.6rem 0 .3rem}
+#drawer h2:first-child{margin-top:0}
+#sub,.sub3{display:grid; grid-template-columns:repeat(3,1fr); gap:.4rem}
+#log{background:#05070a; font:11px/1.45 ui-monospace,Menlo,monospace;
+  white-space:pre-wrap; word-break:break-all; max-height:11rem; overflow-y:auto}
+.frame{font-family:ui-monospace,Menlo,monospace; font-size:.7rem; line-height:1.5; word-break:break-all}
+.frame b{color:var(--warn); font-weight:600}
+.frame i{color:var(--dim); font-style:normal}
+input{width:100%; background:#0c1016; color:var(--fg); border:1px solid var(--line);
+  border-radius:.4rem; padding:.5rem; font-family:ui-monospace,Menlo,monospace; font-size:.8rem}
+select{font:inherit; background:#05070a; color:var(--fg); border:1px solid var(--line);
+  border-radius:.25rem; padding:.2rem .15rem}
+.note{line-height:1.5}
+details{margin-top:.3rem}
+summary{color:var(--accent); cursor:pointer; padding:.15rem 0; font-weight:600}
+.steps{margin:.4rem 0 .1rem 1.1rem; line-height:1.6}
 .steps li{margin-bottom:.35rem}
 .steps b{color:var(--fg)}
-code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
-  background:#0c1016;border:1px solid var(--line);border-radius:.2rem;padding:0 .2rem}
+code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
+  background:#0c1016; border:1px solid var(--line); border-radius:.2rem; padding:0 .2rem}
+
+/* 横向きは縦が足りない。3 段を横 3 列に組み替える（index.html と同じ） */
+@media(orientation:landscape) and (max-height:560px){
+  #gauges{grid-template-rows:1fr auto; grid-template-columns:repeat(3,1fr)}
+  #secondary{grid-column:1 / -1}
+  .val{font-size:min(13vw,26vh)}
+}
 </style>
 
-<h1>CB250R 基板<span id="ver"></span></h1>
-
 <div id="status">
-  <div class="chip" id="cBle"><i class="dot"></i><span>未接続</span></div>
-  <div class="chip" id="cRec"><i class="dot"></i><span>記録なし</span></div>
-  <div class="chip" id="cGps"><i class="dot"></i><span>測位なし</span></div>
-  <div class="chip" id="cFrm"><i class="dot"></i><span>0 フレーム</span></div>
-  <div class="chip" id="cXfer"><i class="dot"></i><span>未転送なし</span></div>
+  <span class="chip" id="cBle"><span class="dot"></span>BLE</span>
+  <span class="chip" id="cRec"><span class="dot"></span>REC</span>
+  <span class="chip" id="cGps"><span class="dot"></span>GPS</span>
+  <span class="chip" id="cXfer"><span class="dot"></span>取込</span>
+  <span id="ver"></span>
+  <span id="hz">-- Hz</span>
 </div>
+<div id="alert"></div>
 
-<div id="mode">
-  <button id="mMon" class="sel">モニタ</button>
-  <button id="mRaw">計測（生フレーム）</button>
-</div>
-
-<section id="panMon">
-  <div class="cell wide" style="background:transparent;border:0;padding:0">
-    <div class="k" style="text-align:center">ギヤ</div>
-    <div class="big dim" id="mGear">—</div>
-    <div class="k" style="text-align:center" id="mDrive">—</div>
+<div id="gauges">
+  <div class="row">
+    <div class="lbl">RPM</div>
+    <div class="val stale" id="rpmv">----</div>
+    <div id="rpmbar"><div id="rpmfill"></div></div>
   </div>
-  <div class="grid" style="margin-top:.5rem">
-    <div class="cell"><div class="k">回転数</div><div class="v"><span id="mRpm">—</span><span class="u">rpm</span></div></div>
-    <div class="cell"><div class="k">車速</div><div class="v"><span id="mSpd">—</span><span class="u">km/h</span></div></div>
-    <div class="cell"><div class="k">水温</div><div class="v"><span id="mEct">—</span><span class="u">℃</span></div></div>
-    <div class="cell"><div class="k">噴射</div><div class="v"><span id="mInj">—</span></div></div>
+
+  <div class="row">
+    <div class="lbl">km/h</div>
+    <div class="val stale" id="spdv">--</div>
+    <div class="sub" id="gpsspd">GPS --</div>
   </div>
-</section>
 
-<div class="row">
-  <button id="bConn" class="primary">基板に接続</button>
-  <button id="bStart" disabled>記録開始</button>
-  <button id="bStop" class="danger" disabled>記録停止</button>
-</div>
-<div class="row">
-  <button id="bSnap" disabled>snap（手動。通常は不要）</button>
-  <button id="bExport" disabled>測位を書き出す</button>
-</div>
-
-<section id="restore" hidden>
-  <h2>前回の測位データが残っている</h2>
-  <div class="note" id="restoreInfo"></div>
-  <div class="row" style="margin-top:.4rem">
-    <button id="bRestoreExp">書き出す</button>
-    <button id="bRestoreDel" class="danger">捨てる</button>
+  <div class="row">
+    <div class="lbl">GEAR</div>
+    <div class="val stale" id="gearv">?</div>
+    <div class="sub" id="drivev">--</div>
   </div>
-</section>
 
-<section id="panRaw" hidden>
-  <h2>生フレーム（接続してから動いたバイトを強調）</h2>
-  <div class="frame" id="frames"><i>まだ来ていない</i></div>
-</section>
+  <div id="secondary">
+    <div class="cell"><div class="lbl">THR %</div><div class="val stale" id="thrv">--</div></div>
+    <div class="cell"><div class="lbl">INJ</div><div class="val stale" id="injv">--</div></div>
+    <div class="cell" id="ectc"><div class="lbl">ECT °C</div><div class="val stale" id="ectv">--</div></div>
+    <div class="cell" id="voltc"><div class="lbl">VOLT</div><div class="val stale" id="voltv">--</div></div>
+  </div>
+</div>
 
-<section>
+<div id="bar">
+  <button id="bConn">接続</button>
+  <button id="bRec" class="rec" disabled>REC</button>
+  <button id="bXfer" disabled>取込</button>
+  <button id="bLog">ログ</button>
+</div>
+
+<div id="drawer">
+  <h2>副操作</h2>
+  <div id="sub">
+    <button id="bExport" disabled>測位を書き出す</button>
+    <button id="bSnap" disabled>snap</button>
+    <button id="bLs" disabled>一覧を取り直す</button>
+  </div>
+
   <h2>基板に残っているログ</h2>
   <div class="note" id="pending">（なし）</div>
-  <div class="row" style="margin-top:.4rem">
-    <button id="bLs" disabled>一覧を取り直す</button>
-    <button id="bXfer" disabled>未転送を取り込む</button>
-  </div>
-</section>
 
-<section>
+  <h2>前スプロケ</h2>
+  <label>丁数 <select id="sfront"></select></label>
+  <span id="corr"></span>
+
+  <h2 id="restoreH" hidden>前回の測位データが残っている</h2>
+  <div id="restore" hidden>
+    <div class="note" id="restoreInfo"></div>
+    <div class="sub3" style="margin-top:.3rem">
+      <button id="bRestoreExp">書き出す</button>
+      <button id="bRestoreDel">捨てる</button>
+    </div>
+  </div>
+
+  <h2>生フレーム（動いたバイトを強調）</h2>
+  <div class="frame" id="frames"><i>まだ来ていない</i></div>
+
   <h2>基板の出力</h2>
   <div id="log"></div>
-</section>
 
-<section>
-  <h2>コマンド（そのまま基板へ）</h2>
-  <input id="cmd" placeholder="? / snap / ls / df / t D1" autocapitalize="off"
-         autocomplete="off" spellcheck="false">
-  <div class="note" style="margin-top:.4rem">
-    <b>wifi のパスワードはここに打たない。</b>画面に残る。設定は Mac 側から。
-  </div>
-</section>
+  <h2>コマンド</h2>
+  <input id="cmd" placeholder="? / ls / df / t D1" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <div class="note" style="margin-top:.3rem"><b>wifi のパスワードはここに打たない。</b>画面に残る</div>
 
-<section>
+  <h2>使い方</h2>
   <details>
     <summary>操作手順</summary>
     <ol class="steps">
       <li><b>キー ON → エンジン始動。</b>基板側で <code>auto</code> を有効にしてあれば
         ここで既に記録が始まっている</li>
-      <li><b>「基板に接続」。</b>壁時計とアンカーが入り、<b>未転送のログがあれば裏で
-        回収を始める</b>（走行中も進む）</li>
-      <li><code>auto</code> を使っていないなら<b>「記録開始」</b>。チップが赤い
-        「記録中」になり、フレーム数が増えるのを確認する</li>
+      <li><b>「接続」。</b>壁時計とアンカーが入り、<b>未転送のログがあれば裏で回収を
+        始める</b>（走行中も進む）</li>
+      <li><code>auto</code> を使っていないなら<b>「REC」</b>。チップが赤くなり
+        <b>Hz が出る</b>のを確認する</li>
       <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない</li>
-      <li><b>停車したら、エンジンを掛けたまま「記録停止」→「未転送を取り込む」</b></li>
+      <li><b>停車したら、エンジンを掛けたまま「REC」で停止 →「取込」</b></li>
       <li>CRC 一致を確認して<b>キーオフ</b>。<b>転送しきれなければ切ってよい</b> ——
         次回接続時に裏で続ける</li>
-      <li>「測位を書き出す」で CSV と GPX が端末に落ちる
+      <li>「測位を書き出す」で CSV と GPX が端末に落ちる</li>
     </ol>
   </details>
   <details>
@@ -188,27 +225,18 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
       <li><b>キーを切ると電源も落ちる。</b>IG ON でエンジンだけ切ることはできないので、
         転送はエンジンを掛けたまま行う。<b>1 時間の走行で約 73 秒</b>、3 時間なら 3.6 分。
         長い走行は転送せず切って、次回に裏で回収させる方が現実的</li>
-      <li><b>「記録停止」を押さずにキーを切ると末尾 5 秒を失う</b>（書き出しが 5 秒周期）。
-        ファイルシステムは壊れないので、失うのは末尾だけ</li>
-      <li><b>基板側で <code>auto</code> を有効にしてあると、ファイル名が時刻にならない。</b>
-        キー ON の時点で既に記録中で、「記録開始」は新しいファイルを作らず既存に追記する。
-        時刻入りの名前にしたいなら<b>「記録停止」→「記録開始」</b>の順に押す。
-        スマホを持つ日は <code>auto</code> を切っておくのが素直</li>
-      <li><b>測位は走行の必須項目。</b>独自層の車速バイトの校正は GPS しか基準が無い
-        （標準層の <code>0D</code> はセッションが排他で同じ走行では読めない）。
-        取り忘れると走行 1 本が無駄になる</li>
-      <li>接続が切れても<b>基板は記録を続ける</b>（<code>poll</code> も <code>rec</code> も
-        BLE 非依存）。切れて困るのは測位ログだけ</li>
-      <li><b>snap は押さなくていい。</b>基板が起動時に自動で撮る（<code>auto</code> 有効時）。
-        価値があるのは凍結テーブルが走行をまたいで変わったかどうかで、1 走行 1 回で足りる</li>
+      <li><b>「REC」で停止せずキーを切ると末尾 5 秒を失う</b>（書き出しが 5 秒周期）。
+        ファイルシステムは壊れないので失うのは末尾だけ</li>
+      <li><b>測位は車速校正の唯一の基準。</b>独自層の車速バイトは標準層の <code>0D</code> と
+        同じ信号だが、<code>0D</code> はセッション排他で同じ走行では読めない</li>
+      <li><b>snap は押さなくていい。</b>基板が起動時に自動で撮る</li>
       <li><b>セッションが落ちても基板が自分で張り直す。</b>無応答が約 3 秒続いたら
-        <code>w</code> を打ち直し、ログに印を残す。始動のクランキングで落ちた場合の保険</li>
-      <li><b>このページが繋いでいるあいだ、Mac からは基板が見つからない。</b>
-        接続中は広告が止まるため。電源が入っていないのと区別が付かないので、
-        Mac で作業するときはまずこのページを閉じる</li>
+        <code>w</code> を打ち直し、ログに印を残す</li>
+      <li>このページが繋いでいるあいだ、<b>Mac からは基板が見つからない</b>
+        （接続中は広告が止まる）</li>
     </ul>
   </details>
-</section>
+</div>
 
 <script>
 const VERSION = 'v20260919a';
@@ -234,7 +262,7 @@ let rxBuf = '';
 const $ = id => document.getElementById(id);
 function chip(el, on, text, cls) {
   el.className = 'chip' + (on ? (cls ? ' ' + cls : ' on') : '');
-  el.querySelector('span').textContent = text;
+  el.innerHTML = '<span class="dot"></span>' + text;   // ラベルは素のテキストノード
 }
 function say(s) {
   const l = $('log');
@@ -254,7 +282,7 @@ async function connect() {
     dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
     dev.addEventListener('gattserverdisconnected', () => {
       chip($('cBle'), false, '切断');
-      $('bStart').disabled = $('bStop').disabled = $('bSnap').disabled = true;
+      $('bRec').disabled = $('bSnap').disabled = $('bXfer').disabled = $('bLs').disabled = true;
       say('\n[BLE 切断。基板の記録は続いている]\n');
     });
     const srv = await (await dev.gatt.connect()).getPrimaryService(SVC);
@@ -262,8 +290,9 @@ async function connect() {
     txChar = await srv.getCharacteristic(TX);
     await txChar.startNotifications();
     txChar.addEventListener('characteristicvaluechanged', e => feed(e.target.value));
-    chip($('cBle'), true, dev.name || '接続');
-    $('bStart').disabled = $('bStop').disabled = $('bSnap').disabled = false;
+    chip($('cBle'), true, 'BLE');
+    $('bConn').classList.add('active');      // 状態ボタンは効力が続く間ずっと点灯
+    $('bRec').disabled = $('bSnap').disabled = false;
     $('bLs').disabled = $('bXfer').disabled = false;
     // **接続したら壁時計を入れる。** 基板に RTC が無いので、これをやらないと
     // 記録した時刻を測位ログと突き合わせられない
@@ -316,17 +345,26 @@ function onFrame(line) {
   const f = line.split(' ');
   if (f.length < 4) return;
   const tt = f[2];
-  frames++;
-  if (f[3] === '-') { chip($('cFrm'), true, frames + ' フレーム'); return; }
+  frames++; hzTick();
+  if (f[3] === '-') return;
   const by = f.slice(3);
   let t = tables.get(tt);
   if (!t) { t = { cur: [], seen: [] }; tables.set(tt, t); }
   t.cur = by;
   by.forEach((h, k) => { (t.seen[k] ||= new Set()).add(h); });
-  chip($('cFrm'), true, frames + ' フレーム');
   onMonFrame(tt, by);
   render();
   renderMon();
+}
+
+/* 表示レート。index.html と同じく状態バーに出す */
+let hzWin = [];
+function hzTick() {
+  const t = performance.now();
+  hzWin.push(t);
+  while (hzWin.length && t - hzWin[0] > 3000) hzWin.shift();
+  $('hz').textContent = hzWin.length < 2 ? '-- Hz'
+    : (hzWin.length / ((t - hzWin[0]) / 1000) / 2).toFixed(1) + ' Hz';   // 2 テーブルで 1 周期
 }
 
 let renderAt = 0, renderTimer = null;
@@ -421,7 +459,8 @@ function gearFrom(rpm, raw, drive) {
 }
 
 const DRIVE_TXT = {0x00: '駆動', 0x01: 'N / クラッチ', 0x03: 'スタンド'};
-let mon = {rpm: null, spd: null, ect: null, gear: null, drive: null, inj: null, at: 0};
+let mon = {rpm: null, spd: null, ect: null, gear: null, drive: null,
+           inj: null, thr: null, volt: null, at: 0};
 
 function onMonFrame(tt, by) {
   const b = by.map(h => parseInt(h, 16));
@@ -430,6 +469,8 @@ function onMonFrame(tt, by) {
     mon.spd = b[17];
     mon.ect = b[9] - 40;
     mon.inj = (b[18] << 8) | b[19];
+    mon.thr = b[6] * 100 / 255;      // [6] = 絶対スロットル。標準層 PID 11 と同じ符号化
+    mon.volt = b[16] / 10;
   } else if (tt === 'D1' && b.length >= 11) {
     mon.drive = b[4];
   }
@@ -439,6 +480,12 @@ function onMonFrame(tt, by) {
 }
 
 let monAt = 0, monTimer = null;
+const REV_LIMIT = 10500;
+function setv(id, txt, stale) {
+  const e = $(id);
+  e.textContent = txt;
+  e.classList.toggle('stale', stale);
+}
 function renderMon() {
   // **間引くが捨てない。** 単に return すると最後のフレームが描かれず表示が 1 サンプル
   // 遅れる（`render()` で一度直したのと同じ誤りを再発させた）
@@ -448,18 +495,29 @@ function renderMon() {
     return;
   }
   monAt = Date.now();
-  const stale = Date.now() - mon.at > 2000;
-  $('mGear').textContent = stale ? '—'
-    : mon.gear !== null ? mon.gear
-    : mon.drive === 0x01 ? 'N' : mon.drive === 0x03 ? 'P' : '—';
-  $('mGear').className = 'big' + (stale ? ' dim' : '');
-  $('mRpm').textContent = stale || mon.rpm === null ? '—' : mon.rpm;
-  $('mSpd').textContent = stale || mon.spd === null ? '—'
-    : Math.round(spdTrue(mon.spd) * speedCorr());
-  $('mEct').textContent = stale || mon.ect === null ? '—' : mon.ect;
-  $('mDrive').textContent = stale ? '—' : (DRIVE_TXT[mon.drive] || '?');
-  $('mInj').textContent = stale || mon.inj === null ? '—'
-    : (mon.inj === 0 ? '燃料カット' : mon.inj);
+  const st = Date.now() - mon.at > 2000;      // 古い値は薄くする（index.html と同じ）
+
+  setv('rpmv', mon.rpm === null ? '----' : mon.rpm, st);
+  $('rpmfill').style.width =
+    (mon.rpm === null || st ? 0 : Math.min(100, mon.rpm / REV_LIMIT * 100)) + '%';
+
+  setv('spdv', mon.spd === null ? '--' : Math.round(spdTrue(mon.spd) * speedCorr()), st);
+  const g = pts.length ? pts[pts.length - 1] : null;
+  $('gpsspd').textContent = g && g.spd != null ? 'GPS ' + Math.round(g.spd * 3.6) : 'GPS --';
+
+  // ギヤは index 4 で意味が決まる。**N とスタンドは推定を出さない**
+  setv('gearv', mon.gear !== null ? mon.gear
+      : mon.drive === 0x01 ? 'N' : mon.drive === 0x03 ? 'P' : '?', st);
+  $('drivev').textContent = mon.drive === null ? '--' : (DRIVE_TXT[mon.drive] || '?');
+
+  setv('thrv', mon.thr === null ? '--' : mon.thr.toFixed(1), st);
+  setv('injv', mon.inj === null ? '--' : (mon.inj === 0 ? 'CUT' : mon.inj), st);
+  setv('ectv', mon.ect === null ? '--' : mon.ect, st);
+  setv('voltv', mon.volt === null ? '--' : mon.volt.toFixed(1), st);
+  // 水温と電圧だけ色を変える。走行中に異常を見落とすと困る量
+  $('ectc').className = 'cell' + (mon.ect > 105 ? ' bad' : mon.ect > 98 ? ' warn' : '');
+  $('voltc').className = 'cell' + (mon.volt !== null && (mon.volt < 12.0 || mon.volt > 15.0)
+      ? ' bad' : mon.volt !== null && mon.volt < 12.8 ? ' warn' : '');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -547,8 +605,8 @@ function lsLine(line) {
 
 function renderPending() {
   const n = queue.length + (xf ? 1 : 0);
-  chip($('cXfer'), n > 0, n === 0 ? '未転送なし'
-      : xf ? `転送中 ${xf.b64.length * 126 >> 10}KB` : `未転送 ${n} 本`);
+  chip($('cXfer'), n > 0, n === 0 ? '取込'
+      : xf ? `取込 ${xf.b64.length * 126 >> 10}K` : `取込 ${n}`);
   $('pending').textContent = queue.length ? queue.join(' / ') : '（なし）';
 }
 
@@ -566,8 +624,20 @@ function stamp() {
        + '_' + p(d.getHours()) + p(d.getMinutes());
 }
 
-async function startRec() {
-  $('bStart').disabled = true;
+async function toggleRec() {
+  if (recOn) {
+    say('\n[記録停止]\n');
+    await send('poll off');
+    await new Promise(r => setTimeout(r, 600));
+    await send('rec off');
+    recOn = false;
+    chip($('cRec'), false, 'REC');
+    $('bRec').classList.remove('active');
+    stopGps();
+    chip($('cGps'), false, 'GPS');
+    return;
+  }
+  $('bRec').disabled = true;
   say('\n[記録開始]\n');
   await send('w');                                   // 独自層を起こす
   await new Promise(r => setTimeout(r, 3000));
@@ -575,19 +645,10 @@ async function startRec() {
   await new Promise(r => setTimeout(r, 600));
   await send('poll D1 11 200');
   recOn = true;
-  chip($('cRec'), true, '記録中', 'rec');
+  chip($('cRec'), true, 'REC', 'rec');
+  $('bRec').classList.add('active');
+  $('bRec').disabled = false;
   await startGps();
-}
-
-async function stopRec() {
-  say('\n[記録停止]\n');
-  await send('poll off');
-  await new Promise(r => setTimeout(r, 600));
-  await send('rec off');
-  recOn = false;
-  chip($('cRec'), false, '記録なし');
-  $('bStart').disabled = false;
-  stopGps();
 }
 
 // ── 測位 ──────────────────────────────────────────────
@@ -603,7 +664,7 @@ async function startGps() {
       spd: p.coords.speed == null ? null : +p.coords.speed.toFixed(2),
       acc: p.coords.accuracy == null ? null : +p.coords.accuracy.toFixed(1),
     });
-    chip($('cGps'), true, pts.length + ' 点 ±' + Math.round(p.coords.accuracy) + 'm');
+    chip($('cGps'), true, 'GPS ' + pts.length);
     $('bExport').disabled = false;
     save();
   }, e => say('測位エラー: ' + e.message + '\n'),
@@ -648,19 +709,16 @@ function exportPts(arr) {
 }
 
 // ── 配線 ──────────────────────────────────────────────
-$('mMon').onclick = () => setMode(true);
-$('mRaw').onclick = () => setMode(false);
-function setMode(monitor) {
-  $('panMon').hidden = !monitor; $('panRaw').hidden = monitor;
-  $('mMon').className = monitor ? 'sel' : ''; $('mRaw').className = monitor ? '' : 'sel';
-}
-$('bLs').onclick = async () => { queue = []; await send('rec'); await send('ls'); };
-$('bXfer').onclick = drain;
 $('bConn').onclick = connect;
-$('bStart').onclick = startRec;
-$('bStop').onclick = stopRec;
-$('bSnap').onclick = () => send('snap');
+$('bRec').onclick = toggleRec;
+$('bXfer').onclick = drain;
+$('bLog').onclick = () => {
+  const open = $('drawer').classList.toggle('open');
+  $('bLog').classList.toggle('active', open);   // 引き出しが開いている間は点灯
+};
 $('bExport').onclick = () => exportPts(pts);
+$('bSnap').onclick = () => send('snap');
+$('bLs').onclick = async () => { queue = []; await send('rec'); await send('ls'); };
 $('cmd').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const v = e.target.value.trim();
@@ -670,16 +728,36 @@ $('cmd').addEventListener('keydown', e => {
   e.target.value = '';
 });
 
+/* 前スプロケは任意値でなく選択にする。非現実的な値を入れられない
+   （実在の品揃えが 12〜15T。index.html と同じ根拠） */
+const sel = $('sfront');
+for (let t = 12; t <= 15; t++) {
+  const o = document.createElement('option');
+  o.value = t; o.textContent = t + 'T';
+  if (t === sprkFront) o.selected = true;
+  sel.appendChild(o);
+}
+function showCorr() {
+  $('corr').textContent = '表示係数 ×' + speedCorr().toFixed(4)
+    + (sprkFront === STOCK_FRONT ? '（純正）' : '');
+}
+sel.onchange = () => {
+  sprkFront = parseInt(sel.value, 10);
+  try { localStorage.setItem('mc52_sf', sprkFront); } catch (e) {}
+  showCorr();
+};
+showCorr();
+
 // 前回のデータが残っていたら拾えるようにする（ページが落ちても失わない）
 try {
   const old = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
   if (old.length) {
-    $('restore').hidden = false;
+    $('restore').hidden = $('restoreH').hidden = false;
     $('restoreInfo').textContent =
       old.length + ' 点 / ' + new Date(old[0].t).toLocaleString();
     $('bRestoreExp').onclick = () => exportPts(old);
     $('bRestoreDel').onclick = () => {
-      localStorage.removeItem(LS_KEY); $('restore').hidden = true;
+      localStorage.removeItem(LS_KEY); $('restore').hidden = $('restoreH').hidden = true;
     };
   }
 } catch (e) { /* 壊れていたら無視する */ }
