@@ -57,6 +57,31 @@ body{
   background:#5c0f1b; border-bottom:1px solid var(--bad); color:#ffd9de}
 #alert.show{display:block}
 #alert.warn{background:#5a4310; border-color:var(--warn); color:#ffe9c2}
+
+/* 初回接続の問い合わせ。**既定を勝手に決めない**ので、選ぶまで覆う */
+#ask{position:fixed; inset:0; background:#000a; display:flex; align-items:center;
+  justify-content:center; padding:1rem; z-index:50}
+#ask[hidden]{display:none}
+.askbox{background:var(--panel); border:1px solid var(--accent); border-radius:.6rem;
+  padding:.9rem; max-width:22rem; width:100%; font-size:.8rem; line-height:1.6}
+.askbox .k{color:var(--dim); font-size:.7rem; margin-bottom:.4rem}
+.askrow{display:flex; gap:.4rem; margin-top:.7rem}
+.askrow button{flex:1}
+
+/* ログ一覧はセッション単位に畳む。満杯だと 45 パート出るので走行ごとに 1 行 */
+#files{max-height:16rem; overflow-y:auto}
+.sess{border-bottom:1px solid var(--line); padding:.35rem 0}
+.sess:last-child{border-bottom:0}
+.sessHd{display:flex; align-items:center; gap:.4rem}
+.sessHd .nm{flex:1 1 auto; color:var(--fg); font-size:.74rem}
+.sessHd .st{font-size:.66rem; white-space:nowrap}
+.sessHd button{flex:0 0 auto; min-height:1.8rem; padding:.2rem .5rem; font-size:.7rem}
+.tw{cursor:pointer; color:var(--dim); padding:0 .25rem; user-select:none}
+.parts{margin:.3rem 0 .1rem .8rem; font-size:.7rem}
+.parts div{display:flex; gap:.4rem; align-items:center; padding:.1rem 0}
+.parts .nm{flex:1 1 auto}
+.parts button{min-height:1.6rem; padding:.1rem .45rem; font-size:.68rem}
+.stGot{color:var(--ok)} .stSkip{color:var(--dim)} .stRec{color:var(--bad)}
 #alert b{color:#fff}
 
 /* ── 計器 ───────────────────────────────────── */
@@ -134,6 +159,14 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 </div>
 <div id="alert"></div>
 
+<div id="ask" hidden>
+  <div class="askbox">
+    <div class="k" id="askTitle">この端末は初めての接続</div>
+    <div id="askBody"></div>
+    <div class="askrow" id="askBtns"></div>
+  </div>
+</div>
+
 <div id="gauges">
   <div class="row">
     <div class="lbl">RPM</div>
@@ -177,7 +210,11 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
   </div>
 
   <h2>基板に残っているログ</h2>
-  <div class="note" id="pending">（なし）</div>
+  <div id="files" class="note">（未取得）</div>
+  <div class="sub3" style="margin-top:.4rem">
+    <button id="bRmGot" disabled>回収済みを消す</button>
+    <button id="bRmAll" disabled>全部消す</button>
+  </div>
 
   <h2>前スプロケ</h2>
   <label>丁数 <select id="sfront"></select></label>
@@ -208,8 +245,11 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
     <ol class="steps">
       <li><b>キー ON → エンジン始動。</b>基板側で <code>auto</code> を有効にしてあれば
         ここで既に記録が始まっている</li>
-      <li><b>「接続」。</b>壁時計とアンカーが入り、<b>未転送のログがあれば裏で回収を
-        始める</b>（走行中も進む）</li>
+      <li><b>「接続」。</b>壁時計とアンカーが入る。<b>この端末で初めてなら、基板に
+        溜まっているぶんを DL するか聞かれる</b>（どちらを選んでも以後は取りに行かない。
+        新しいログは自動で取り込む）</li>
+      <li><b>REC が「待機」ならまだ保存されていない。</b>基板は最初の応答が返るまで
+        ファイルを開かない。応答が来れば「REC」（赤）に変わる</li>
       <li><code>auto</code> を使っていないなら<b>「REC」</b>。チップが赤くなり
         <b>Hz が出る</b>のを確認する</li>
       <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない</li>
@@ -230,6 +270,8 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
         ファイルシステムは壊れないので失うのは末尾だけ</li>
       <li><b>測位は車速校正の唯一の基準。</b>独自層の車速バイトは標準層の <code>0D</code> と
         同じ信号だが、<code>0D</code> はセッション排他で同じ走行では読めない</li>
+      <li><b>「DLしない」を選んだ後でも、引き出しの一覧から個別に取れる。</b>
+        走行ごとに畳んであり、<code>▸</code> で開くとパート単位でも取れる</li>
       <li><b>「停止・取込」の後は記録が再開しない。</b><code>auto</code> は起動時にしか
         走らないので、押した時点で基板は止まる（計器が <code>----</code> になるので
         見て分かる）。**だから回収後からキーオフまでの要らないデータは溜まらない。**
@@ -247,7 +289,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 </div>
 
 <script>
-const VERSION = 'v20260919c';
+const VERSION = 'v20260920a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -290,7 +332,8 @@ async function connect() {
     dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
     dev.addEventListener('gattserverdisconnected', () => {
       chip($('cBle'), false, '切断');
-      $('bRec').disabled = $('bSnap').disabled = $('bXfer').disabled = $('bLs').disabled = true;
+      $('bRec').disabled = $('bSnap').disabled = $('bXfer').disabled = true;
+      $('bLs').disabled = $('bRmGot').disabled = $('bRmAll').disabled = true;
       say('\n[BLE 切断。基板の記録は続いている]\n');
     });
     const srv = await (await dev.gatt.connect()).getPrimaryService(SVC);
@@ -302,6 +345,7 @@ async function connect() {
     $('bConn').classList.add('active');      // 状態ボタンは効力が続く間ずっと点灯
     $('bRec').disabled = $('bSnap').disabled = false;
     $('bLs').disabled = $('bXfer').disabled = false;
+    $('bRmGot').disabled = $('bRmAll').disabled = false;
     // **接続したら壁時計を入れる。** 基板に RTC が無いので、これをやらないと
     // 記録した時刻を測位ログと突き合わせられない
     const epoch = Math.floor(Date.now() / 1000);
@@ -311,9 +355,10 @@ async function connect() {
     await send('note t=' + epoch);
     await send('rec');                 // 記録中のファイル名を知る（転送から除く）
     await new Promise(r => setTimeout(r, 400));
-    queue = []; seen = {};
-    await send('ls');                  // 未転送を洗い出して自動で回収に入る
-    setTimeout(() => { sealBaseline(); drain(); }, 1800);
+    queue = []; seen = {}; sessAt = {};
+    await send('sess');                // セッションの開始時刻（auto は名前に入らない）
+    await send('ls');                  // 未転送を洗い出す
+    setTimeout(() => { baseDone ? drain() : askFirst(); }, 1800);
   } catch (e) {
     say('接続できない: ' + e.message + '\n');
   }
@@ -335,8 +380,8 @@ function feed(v) {
     const line = rxBuf.slice(0, i).replace(/\r$/, '');
     rxBuf = rxBuf.slice(i + 1);
     if (line.startsWith('P ')) onFrame(line);
-    else if (xferLine(line)) { renderPending(); }
-    else if (lsLine(line)) { /* 一覧は表示側で持つ */ }
+    else if (xferLine(line)) { renderFiles(); }
+    else if (lsLine(line) || sessLine(line)) { /* 一覧は表示側で持つ */ }
     else if (line.trim()) {
       say(line + '\n');
       // 記録中のファイルは転送してはいけない（追記中のものを吸うと壊れる）
@@ -353,6 +398,15 @@ function feed(v) {
           $('bRec').classList.add('active');
           startGps();
         }
+      }
+      /* **武装（応答待ち）と記録中を区別する。** 基板は最初の応答が返るまで
+       * ファイルを開かないので、点灯しっぱなしだと「録れているつもり」になる。 */
+      if (/^記録を待機|^待機中/.test(line)) {
+        activeLog = null;
+        recOn = false;
+        chip($('cRec'), true, '待機');
+        $('bRec').classList.add('active');
+        startGps();
       }
       if (/^記録していない/.test(line)) {
         activeLog = null;
@@ -614,7 +668,7 @@ function xferLine(line) {
       say(`[転送失敗 ${xf.name} ${buf.length}/${xf.size}B CRC ${have.toString(16)}≠${want.toString(16)}]\n`);
     }
     xf = null;
-    renderPending();
+    renderFiles();
     setTimeout(drain, 800);        // 次のファイルへ
     return true;
   }
@@ -629,7 +683,7 @@ function dlBin(name, buf) {
 }
 
 /* `ls` の出力を拾う。`  name.bin   12345 バイト` */
-let seen = {};
+let seen = {}, sessAt = {};
 function lsLine(line) {
   const m = line.match(/^\s+(\S+\.bin)\s+(\d+) バイト\s*$/);
   if (!m) return false;
@@ -638,32 +692,156 @@ function lsLine(line) {
   if (baseDone && name !== activeLog && !(got[name] && got[name].size === +size)) {
     if (!queue.includes(name)) queue.push(name);
   }
-  renderPending();
+  renderFiles();
   return true;
 }
 
-/* 初回接続の締め。`ls` の出力が出揃ったころに呼ぶ。 */
-function sealBaseline() {
-  if (baseDone) return;
-  const n = Object.keys(seen).length;
-  for (const k in seen) got[k] = {size: seen[k], base: true};
+/* `sess` の出力。`  auto0005  2026-09-19 13:07:14`
+ * **`auto` は起動時に走るので名前に日時が入らない。** 基板が NVS に持つ台帳から取る。 */
+function sessLine(line) {
+  const m = line.match(/^\s+(auto\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*$/);
+  if (!m) return false;
+  sessAt[m[1]] = m[2];
+  renderFiles();
+  return true;
+}
+
+/** ファイル名 → セッション名（`auto0003_01.bin` → `auto0003`） */
+const baseOf = n => n.replace(/(_\d+)?\.bin$/, '');
+
+/** この端末がそのファイルを実際に落として CRC を検証したか */
+const isGot = n => !!(got[n] && got[n].crc != null && got[n].size === seen[n]);
+/** 初回接続で「DLしない」と決めたぶん */
+const isSkip = n => !!(got[n] && got[n].base);
+
+function renderFiles() {
+  const bys = {};
+  for (const n of Object.keys(seen)) (bys[baseOf(n)] ||= []).push(n);
+  const keys = Object.keys(bys).sort().reverse();       // 新しい順
+  if (!keys.length) { $('files').textContent = '（なし）'; return; }
+  const esc = t => t.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  let h = '';
+  for (const b of keys) {
+    const parts = bys[b].sort();
+    const size = parts.reduce((a, n) => a + seen[n], 0);
+    const rec = parts.includes(activeLog);
+    const nGot = parts.filter(isGot).length;
+    const st = rec ? '<span class="stRec">記録中</span>'
+             : nGot === parts.length ? '<span class="stGot">取得済み</span>'
+             : parts.every(isSkip) ? '<span class="stSkip">DLしない</span>'
+             : nGot ? `取得 ${nGot}/${parts.length}` : '未取得';
+    h += `<div class="sess"><div class="sessHd">`
+       + `<span class="tw" data-tw="${esc(b)}">▸</span>`
+       + `<span class="nm">${esc(b)}　<span class="st">${sessAt[b] || ''}</span></span>`
+       + `<span class="st">${parts.length} 本 / ${(size / 1024) | 0}KB ${st}</span>`
+       + `<button data-dl="${esc(b)}">DL</button></div>`
+       + `<div class="parts" data-parts="${esc(b)}" hidden>`
+       + parts.map(n => `<div><span class="nm">${esc(n)}</span>`
+           + `<span class="st">${(seen[n] / 1024) | 0}KB</span>`
+           + `<button data-dl1="${esc(n)}">DL</button></div>`).join('')
+       + `</div></div>`;
+  }
+  $('files').innerHTML = h;
+  const n = queue.length + (xf ? 1 : 0);
+  chip($('cXfer'), n > 0, n === 0 ? '取込'
+      : xf ? `取込 ${xf.b64.length * 126 >> 10}K` : `取込 ${n}`);
+}
+
+/* 一覧の操作。**「DLしない」を選んだ後でもここから個別に取れる**（逃げ道） */
+$('files').addEventListener('click', e => {
+  const t = e.target;
+  if (t.dataset.tw) {
+    const el = document.querySelector(`[data-parts="${t.dataset.tw}"]`);
+    el.hidden = !el.hidden; t.textContent = el.hidden ? '▸' : '▾';
+  } else if (t.dataset.dl) {
+    for (const n of Object.keys(seen).filter(x => baseOf(x) === t.dataset.dl))
+      if (n !== activeLog && !queue.includes(n)) queue.push(n);
+    drain();
+  } else if (t.dataset.dl1) {
+    if (t.dataset.dl1 !== activeLog && !queue.includes(t.dataset.dl1))
+      queue.push(t.dataset.dl1);
+    drain();
+  }
+});
+
+/* ── 初回接続の問い合わせ ───────────────────────────────
+ * **既定を勝手に決めない。** 2 台目のスマホで初めて繋ぐと基板には過去の走行が溜まって
+ * いる。全部落とすか、落とさずに以後も取りに行かないか、消すか —— **意思が 3 通りある。**
+ *
+ * どれを選んでも**そのとき基板にあったぶんは以後キューに入らない**。これが目的で、
+ * 2 回目以降の接続で毎回過去ぶんを落としにかかるのを避ける。
+ * **以後に現れた新しいログは自動回収**する（繋いでいるのはその走行が欲しいから）。
+ *
+ * 「DLしない」を選んだ後でも、一覧の個別 `DL` から取れる。 */
+function ask(title, body, btns) {
+  $('askTitle').textContent = title;
+  $('askBody').innerHTML = body;
+  $('askBtns').innerHTML = '';
+  for (const [label, fn, cls] of btns) {
+    const b = document.createElement('button');
+    b.textContent = label; if (cls) b.className = cls;
+    b.onclick = () => { $('ask').hidden = true; fn(); };
+    $('askBtns').appendChild(b);
+  }
+  $('ask').hidden = false;
+}
+
+function markBase() {                    // 以後キューに入れない
+  for (const k in seen) if (!got[k]) got[k] = {size: seen[k], base: true};
   baseDone = true;
   try {
     localStorage.setItem(LS_GOT, JSON.stringify(got));
     localStorage.setItem(LS_BASE, '1');
   } catch (e) {}
-  say(`[初回接続: 基板にある ${n} 本を既知として登録した。`
-    + `以後は新しいログだけ自動で取り込む。個別に欲しければ get <名前>]\n`);
   queue = [];
-  renderPending();
+  renderFiles();
 }
 
-function renderPending() {
-  const n = queue.length + (xf ? 1 : 0);
-  chip($('cXfer'), n > 0, n === 0 ? '取込'
-      : xf ? `取込 ${xf.b64.length * 126 >> 10}K` : `取込 ${n}`);
-  $('pending').textContent = queue.length ? queue.join(' / ')
-    : baseDone ? '（なし）' : '（初回接続。基準を取るまで取り込まない）';
+function askFirst() {
+  const names = Object.keys(seen);
+  if (!names.length) { markBase(); return; }
+  const kb = names.reduce((a, n) => a + seen[n], 0) / 1024 | 0;
+  ask('この端末は初めての接続',
+      `基板に <b>${names.length} 本 / ${kb} KB</b> ある。<br>`
+      + 'どちらを選んでも<b>以後この端末は取りに行かない</b>（新しいログは自動で取り込む）。',
+      [['DLする', () => {
+          baseDone = true;
+          try { localStorage.setItem(LS_BASE, '1'); } catch (e) {}
+          for (const n of names) if (n !== activeLog) queue.push(n);
+          renderFiles(); drain();
+        }],
+       ['DLしない', () => { markBase(); askDelete(); }]]);
+}
+
+function askDelete() {
+  const n = Object.keys(seen).filter(x => x !== activeLog).length;
+  if (!n) return;
+  ask('基板から消す？',
+      `DL しないぶん <b>${n} 本</b>を基板から消すこともできる。<br>`
+      + '<b>他の端末や Mac が持っていることを確かめてから。</b>残しても構わない。',
+      [['残す', () => {}],
+       ['消す', () => rmFiles(false, true), 'danger']]);
+}
+
+/* **基板のログを消す。** 「回収したら `rm` する」のが本来の容量管理で、退避は
+ * 最後の砦（`SPEC.md` §15）。
+ *
+ * `onlyGot` の対象は**この端末が実際に落として CRC を検証したものだけ**。初回接続で
+ * 「DLしない」にしたぶん（`base`）はこの端末には無いので外す。記録中も当然外す。 */
+async function rmFiles(onlyGot, skipRefresh) {
+  if (!skipRefresh) {
+    queue = []; seen = {};
+    await send('rec');
+    await send('ls');
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  const names = Object.keys(seen).filter(n => n !== activeLog && (!onlyGot || isGot(n)));
+  if (!names.length) { say('[消せるものが無い]\n'); return; }
+  say(`[${names.length} 本を消す]\n`);
+  for (const n of names.sort()) { await send('rm ' + n); delete got[n]; }
+  try { localStorage.setItem(LS_GOT, JSON.stringify(got)); } catch (e) {}
+  queue = []; seen = {}; sessAt = {};
+  await send('sess'); await send('ls');
 }
 
 async function drain() {
@@ -833,7 +1011,11 @@ try {
     $('restore').hidden = $('restoreH').hidden = false;
     $('restoreInfo').textContent =
       old.length + ' 点 / ' + new Date(old[0].t).toLocaleString();
-    $('bRestoreExp').onclick = () => exportPts(old);
+    $('bRmGot').onclick = () => rmFiles(true);
+$('bRmAll').onclick = () => ask('全部消す',
+    '記録中を除く<b>すべて</b>を基板から消す。取り消せない。',
+    [['やめる', () => {}], ['消す', () => rmFiles(false), 'danger']]);
+$('bRestoreExp').onclick = () => exportPts(old);
     $('bRestoreDel').onclick = () => {
       localStorage.removeItem(LS_KEY); $('restore').hidden = $('restoreH').hidden = true;
     };
