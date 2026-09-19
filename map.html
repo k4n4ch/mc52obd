@@ -424,6 +424,8 @@ const COLS = {
   thr:['throttle','11_tps'], ect:['ect','05_ect'], volt:['volt','42_volt'],
   lat:['lat'], lon:['lon'], gspd:['speed_gps'], acc:['gps_acc'], alt:['alt'],
   iso:['iso_time'],
+  // 自作基板（独自層）だけが持つ列。ELM327 経路には来ない
+  drive:['drive'], inj:['inj'], adv:['0E_adv'], i8:['i8'],
 };
 
 /** 1 ファイルを行の配列にする。**時刻の付け直しと連結は `loadFiles` が行う。** */
@@ -453,6 +455,9 @@ function parseCsv(text, src) {
       lat: num(a, pick.lat), lon: num(a, pick.lon), gspd: num(a, pick.gspd),
       acc: num(a, pick.acc), alt: num(a, pick.alt),
       skew: num(a, pick.skew),
+      // 自作基板だけが持つ量。ELM327 経路の CSV には無いので null になる
+      drive: num(a, pick.drive), inj: num(a, pick.inj),
+      adv: num(a, pick.adv), i8: num(a, pick.i8),
     };
     out.push(r);
   }
@@ -642,6 +647,29 @@ function assignGears(k, tolPct) {
              : r.spd <= STOP_KMH ? 'stop'
              : r.ratio == null ? 'slow' : 'unk';
     if (r.ratio == null) continue;
+    /* ── 駆動状態が取れているログは、それを使う ─────────────
+     * 自作基板の独自層 `0xD1` index 4 が「駆動が繋がっているか」を返す
+     * （`00` 駆動 / `01` N かクラッチ切り / `03` サイドスタンド）。
+     * **これは比推定が原理的に解けない場面を直接分ける。** 実走 2 本 3837
+     * サンプルで、車速 20〜40km/h・rpm 1700〜2400 の帯において駆動中は 75 点の
+     * うち 62 点が 6速へ集まり、非伝達では 18 点が 3/4/5/6 に散った
+     * （`FINDINGS.md`「走行で決着したこと」）。
+     *
+     * **駆動が繋がっていないなら段を答えない。** 逆に繋がっているなら
+     * **窓を外して最近傍で答える** —— 誤答を弾く役は index 4 が担うので、
+     * 窓は「どの段か」を決めるだけでよくなる。ELM327 版は駆動中の 10.0% を
+     * 窓の外として棄却しており、その多くは変速過渡で段自体は最近傍で決まる。
+     * 下限（回転数 1,700rpm・車速 8km/h）も index 4 が担うので効かせない。 */
+    if (r.drive != null) {
+      if (r.drive !== 0) { r.gstate = r.drive === 3 ? 'stop' : 'unk'; continue; }
+      let b = null, bdv = Infinity;
+      for (const n of GEARS) {
+        const d = Math.abs(r.ratio / (k * R[n]) - 1);
+        if (d < bdv) { bdv = d; b = n; }
+      }
+      r.gear = b; r.gstate = 'gear';
+      continue;
+    }
     /* **アイドル回転では、嵌合している段は存在しない。**
      * クラッチを切って惰性で減速すると回転数がアイドル（約1,400）に張り付き、
      * 車速との比が偶然どれかの段と一致してしまう。実測では 6速 22km/h が

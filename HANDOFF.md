@@ -60,7 +60,8 @@ index 4 の追従、**比推定の正解ラベルの取得**、index 9 が段数
 | `tools/klconsole.py` | BLE 対話コンソール。`!` 以外は素通しなのでコマンドを増やしても直さなくていい |
 | `tools/klwatch.py` | `poll` の実時間監視。**動いたバイトを探す計器**（種類 1=定数 2=旗 多い=量） |
 | `tools/kllog.py` | ログの吸い出しと CRC32 検算。既定の出力先は `private/logs` |
-| `tools/kldecode.py` | レコード分解・時刻復元・チェックサム検算・CSV 出力 |
+| `tools/kldecode.py` | レコード分解・時刻復元・チェックサム検算・生ダンプ CSV |
+| `tools/klcsv.py` | **基板のログをビュワーが食える CSV にする。** パートを名前順に連結、`0x11` の 1 フレーム = 1 行、駆動状態を添える、測位 CSV を絶対時刻で突合 |
 | `tools/klota.py` | BLE で `ota on` → IP を拾って焼く |
 | `rec.html` | **走行の記録を仕込むスマホページ**（Android Chrome / Web Bluetooth）。壁時計を入れる・記録を開始する・測位を端末の時計で残す、の 3 つだけ。**Pixel から接続まで確認済み**（2026-09-17）。記録開始・測位・書き出しは未確認 |
 | `tools/bletest.py` | BLE の疎通確認 |
