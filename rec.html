@@ -705,7 +705,11 @@ async function toggleRec() {
 // ── 測位 ──────────────────────────────────────────────
 async function startGps() {
   if (watchId !== null) return;
+  // **測位が無くても走行は続ける。** 記録の契機から呼ぶので、ここで例外を出すと
+  // 通知の処理ごと巻き込む（jsdom で実際に落ちた）
+  if (!navigator.geolocation) { say('この端末では測位が使えない\n'); return; }
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* 無くても動く */ }
+  try {
   watchId = navigator.geolocation.watchPosition(p => {
     pts.push({
       t: p.timestamp,                                // **端末の時計。基板もこれに合わせた**
@@ -720,6 +724,7 @@ async function startGps() {
     save();
   }, e => say('測位エラー: ' + e.message + '\n'),
      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+  } catch (e) { say('測位を始められない: ' + e.message + '\n'); }
 }
 
 function stopGps() {
