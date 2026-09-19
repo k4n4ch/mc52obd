@@ -599,7 +599,30 @@ static void logRec(uint8_t type, const uint8_t *d, size_t n) {
   memcpy(logBuf + logLen, d, n); logLen += n;
   logRecs++;
 }
-static void logTick() { if (recOn && millis() - lastFlush > 5000) logFlush(); }
+/* **開始時の基準は 1 走行が丸ごと入る大きさにする。** 実測 18.5KB/分なので
+ * 1MB では約 57 分しか入らず、1 時間を超える走行の途中で満杯になって止まっていた。
+ * 4MB = 約 3.7 時間。12.2MB のうち残り 8.2MB（約 7.4 時間ぶん）が過去ログ用。 */
+static const size_t LOG_RESERVE = 4UL * 1024UL * 1024UL;
+/* **それでも足りない長距離では走行中に底上げする。** 止まるより続く方がよい。
+ * `usedBytes()` はブロックを走査するので毎回は呼ばない。 */
+static const size_t LOG_LOW = 512UL * 1024UL;
+static const uint32_t ROOM_CHECK_MS = 60000;
+static void makeRoom(const char *keep);
+static uint32_t lastRoomCheck = 0;
+static void logTick() {
+  if (recOn && millis() - lastFlush > 5000) logFlush();
+  if (!recOn || millis() - lastRoomCheck < ROOM_CHECK_MS) return;
+  lastRoomCheck = millis();
+  if (LittleFS.totalBytes() - LittleFS.usedBytes() >= LOG_LOW) return;
+  // 走行中の底上げ。記録中のファイルは消さない
+  char cur[64] = "";
+  if (logFile) strncpy(cur, logFile.name(), sizeof cur - 1);
+  makeRoom(cur);
+  if (pendingNoteLen) {          // 消したものはそのまま今のログへ書く
+    logRec(T_NOTE, (const uint8_t *)pendingNote, pendingNoteLen);
+    pendingNoteLen = 0;
+  }
+}
 
 /* **場所を空ける。** 12.2MB ÷ 18.5KB/分 ≒ 11 時間ぶんしか入らず、`auto` はキーを回す
  * たびにファイルを作るので放っておけば埋まる。溢れてから捨てるのではなく、
@@ -608,8 +631,10 @@ static void logTick() { if (recOn && millis() - lastFlush > 5000) logFlush(); }
  *
  * **消すのは自動生成の名前だけ**（`auto*` と `r*`）。手で名付けた探索ログ
  * （`probe.bin` など）は触らない。名前順は生成順と一致する（連番と日時）。
- * 消したものは記録の先頭に `note` で残す。 */
-static const size_t LOG_RESERVE = 1024UL * 1024UL;   // これだけ空けてから始める
+ * 消したものは `note` で残す。
+ *
+ * **呼ばれるのは 2 箇所。** 記録開始時（基準 4MB）と、走行中に空きが 512KB を
+ * 切ったとき（`logTick` から 60 秒ごとに確認）。 */
 
 static bool autoName(const char *n) {
   if (!strncmp(n, "auto", 4)) return true;
