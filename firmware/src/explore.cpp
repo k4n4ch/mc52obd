@@ -55,6 +55,21 @@ static void out(const char *s) {
     delay(6);
   }
 }
+/* **転送のデータ行だけは Serial に出さない。** 171 バイトを 115200bps へ流すと 14.8ms
+ * かかり、これが転送速度を律速していた（予算を 20→200ms にしても 6.5→6.8KB/s しか
+ * 動かず、Serial を外して初めて上がる）。Serial は BLE が死んだときの逃げ道であって、
+ * base64 を 100KB 流す先ではない。**BLE が繋がっていないときだけ Serial へ落とす。** */
+static void outBle(const char *s) {
+  if (!bleConn || !txChar) { Serial.print(s); return; }
+  const size_t CH = 180;
+  for (size_t i = 0; s[i]; ) {
+    size_t n = strnlen(s + i, CH);
+    txChar->setValue((uint8_t *)(s + i), n);
+    txChar->notify();
+    i += n;
+    delay(6);
+  }
+}
 static void outf(const char *fmt, ...) {
   char b[512];
   va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
@@ -618,19 +633,59 @@ static uint32_t crc32(uint32_t c, const uint8_t *b, size_t n) {
   }
   return ~c;
 }
+/* **転送は非ブロッキングにする。** 記録しながら・表示しながら裏で吸い出すため。
+ * 旧実装はファイルを読み切るまでループを占有していて、その間 `pollTick()` が回らず
+ * **記録にも表示にも穴が空いた**（1 時間の走行で 44 秒ぶん）。
+ *
+ * IG 連動でエンジンを掛けたままでないと転送できないので、長い走行では「転送せずキーオフ
+ * → 次回起動時に裏で転送」が主経路になる。だから占有してはいけない。
+ *
+ * **データ行に `D ` を前置する。** `P` 行（実時間ストリーム）が同じ notify 経路に
+ * 混ざるので、受け手が base64 と区別できる必要がある。
+ *
+ *   BEGIN <パス> <サイズ>
+ *   D <base64 168 文字>      ← 126 バイトぶん。3 の倍数なので途中に詰めが出ない
+ *   END <CRC32>
+ *
+ * **1 ループの予算を `poll` の有無で変える。** `poll` が回っていないなら他にやることが
+ * 無いので大きく取り、回っているなら表示を止めないよう小さく取る。予算 20ms 固定だと
+ * `poll` 停止時でも 6.5KB/s しか出なかった（実測）—— out() が notify ごとに 6ms 待つため、
+ * 予算が狭いと 1 ループに 2 行しか入らずループ諸経費に食われる。
+ *
+ *   poll 停止中: 予算 200ms → 転送に専念
+ *   poll 稼働中: 予算  40ms → 表示を保ちつつ裏で進める
+ *
+ * **律速は out() の 6ms/180 バイト = 30KB/s。** これが上限。 */
+static const size_t GET_CHUNK = 126;          // 42×3。base64 で 168 文字
+static File getFile;
+static bool getOn = false;
+static uint32_t getCrc = 0, getSent = 0;
+
 static void cmdGet(const char *name) {
+  if (getOn) { outf("転送中（%lu バイト送信済み）\n", (unsigned long)getSent); return; }
   char path[64]; snprintf(path, sizeof path, "%s%s", *name == '/' ? "" : "/", name);
-  File f = LittleFS.open(path, "r");
-  if (!f) { outf("無い: %s\n", path); return; }
-  size_t sz = f.size();
-  outf("BEGIN %s %u\n", path, (unsigned)sz);
-  uint8_t in[45]; char line[64];
-  uint32_t crc = 0;
-  while (true) {
-    int n = f.read(in, sizeof in);
-    if (n <= 0) break;
-    crc = crc32(crc, in, n);
+  getFile = LittleFS.open(path, "r");
+  if (!getFile) { outf("無い: %s\n", path); return; }
+  outf("BEGIN %s %u\n", path, (unsigned)getFile.size());
+  getCrc = 0; getSent = 0; getOn = true;
+}
+
+static void getTick() {
+  if (!getOn) return;
+  uint8_t in[GET_CHUNK];
+  char line[GET_CHUNK / 3 * 4 + 8];
+  uint32_t t0 = millis();
+  const uint32_t budget = pollN ? 40 : 200;
+  while (getOn && millis() - t0 < budget) {
+    int n = getFile.read(in, sizeof in);
+    if (n <= 0) {
+      outf("END %08lX\n", (unsigned long)getCrc);
+      getFile.close(); getOn = false;
+      return;
+    }
+    getCrc = crc32(getCrc, in, n);
     int p = 0;
+    line[p++] = 'D'; line[p++] = ' ';
     for (int i = 0; i < n; i += 3) {
       uint32_t v = in[i] << 16 | (i + 1 < n ? in[i+1] << 8 : 0) | (i + 2 < n ? in[i+2] : 0);
       line[p++] = B64[(v >> 18) & 63];
@@ -639,10 +694,9 @@ static void cmdGet(const char *name) {
       line[p++] = i + 2 < n ? B64[v & 63] : '=';
     }
     line[p++] = '\n'; line[p] = 0;
-    out(line);
+    outBle(line);              // Serial に出すと 14.8ms/行で律速する
+    getSent += n;
   }
-  f.close();
-  outf("END %08lX\n", (unsigned long)crc);
 }
 
 // ── コマンド解釈 ─────────────────────────────────────────
@@ -689,7 +743,7 @@ static void help() {
       "  rec on [名前]       記録開始（名前を省くと日時）   rec off  停止\n"
       "  rec                 状態だけ（引数なしでは開始しない）\n"
       "  ls / df / rm <名前> 一覧 / 空き / 削除\n"
-      "  get <名前>          BLE で吸い出す（base64 ＋ CRC32）\n"
+      "  get <名前>          BLE で吸い出す（base64 ＋ CRC32）。**記録と表示を止めない**\n"
       "  note <文字列>       ログに目印を入れる\n"
       "[更新] J3 のジャンパ操作を無くす\n"
       "  wifi                登録済みの一覧   wifi clear  全消し\n"
@@ -876,6 +930,7 @@ void setup() {
 void loop() {
   if (otaOn) ArduinoOTA.handle();
   logTick();
+  getTick();      // 非ブロッキング転送。記録と表示を止めない
   pollTick();
   keepAlive();
   while (Serial.available()) {

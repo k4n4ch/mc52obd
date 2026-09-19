@@ -103,7 +103,11 @@ async def fetch(cli, ses, name, out_dir):
     # **サイズは末尾から取る。** 名前に空白が入りうるので固定位置では壊れる
     size = int(lines[bi].split()[-1])
     want = int(lines[ei].split()[-1], 16)
-    blob = base64.b64decode("".join(lines[bi + 1:ei]))
+    # **データ行は `D ` 前置。** 実時間ストリームの `P` 行が同じ notify 経路に
+    # 混ざるので、前置で選ぶ。前置の無い行は旧ファームの出力として受ける
+    body = [l[2:] if l.startswith("D ") else l
+            for l in lines[bi + 1:ei] if l.startswith("D ") or not l[:2].isupper()]
+    blob = base64.b64decode("".join(body))
     got = binascii.crc32(blob) & 0xFFFFFFFF
 
     ok = (got == want) and (len(blob) == size)
