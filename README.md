@@ -20,8 +20,13 @@ Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるか
 
 **作業状況・次の手順・保留事項は [HANDOFF.md](HANDOFF.md) に集約している。**
 
-実測結果は [FINDINGS.md](docs/FINDINGS.md)、フロントスプロケット 14T / 15T の走行余力比較は
-[GEARING.md](docs/GEARING.md)。
+**成果を 1 本にまとめたレポートが
+[docs/mc52-kline-analysis.md](docs/mc52-kline-analysis.md)。**
+標準層の全数確定・車速信号の同定・ギヤ比推定の定式化・独自層 7 テーブルの同定・
+駆動フラグによる判定則の評価まで。まず読むならここ。
+
+実測結果の全量は [FINDINGS.md](docs/FINDINGS.md)、フロントスプロケット 14T / 15T の
+走行余力比較は [GEARING.md](docs/GEARING.md)。
 
 各アプリの設計と実装は [docs/monitor.md](docs/monitor.md) / [docs/viewer.md](docs/viewer.md)、
 両者に共通するギヤ判定と車速補正は [docs/gear.md](docs/gear.md)。
