@@ -450,7 +450,8 @@ sequenceDiagram
 ## 13. 前提の検証状況
 
 出所と信頼度の詳細は [`PROVENANCE.md`](PROVENANCE.md)、実測は
-[`../docs/FINDINGS.md`](../docs/FINDINGS.md) の「実車で叩いた結果」。
+[`../docs/FINDINGS.md`](../docs/FINDINGS.md)、バイトごとの素性は
+[`../docs/signal-map.md`](../docs/signal-map.md)。
 
 **裏付いたもの（2026-09-17、実車・停車）**
 

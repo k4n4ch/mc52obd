@@ -26,6 +26,8 @@ Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるか
 各アプリの設計と実装は [docs/monitor.md](docs/monitor.md) / [docs/viewer.md](docs/viewer.md)、
 両者に共通するギヤ判定と車速補正は [docs/gear.md](docs/gear.md)。
 
+独自層のバイトごとの素性は [docs/signal-map.md](docs/signal-map.md)（ログから生成）。
+
 2 本立てで進めている。互いに上位互換ではなく、敷居と得られるものが違う。
 
 - **Track A** — 市販 ELM327 で簡易的に実現する手段。ドングルと変換ケーブルだけで完結する。
