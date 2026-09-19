@@ -287,14 +287,25 @@ static int hexBytes(const char *s, uint8_t *b, size_t cap);
 static uint8_t pollTbl[8];
 static int pollN = 0;
 static uint32_t pollMs = 200, pollLast = 0, pollT0 = 0, pollCycles = 0;
+/* **セッションが死んだら張り直す。** 自動記録は IG ON（エンジン停止）で `w` を打つので、
+ * その後のクランキングでセッションが落ちると、誰も気付かないまま走行まるごと無応答の
+ * ログになる。09-17 の実測ではクランキングを跨いで生きていたが保証ではない。
+ * **無応答が続いたら `w` を打ち直す。** logRec に印も残す。 */
+static const int POLL_MISS_MAX = 15;        // 200ms 周期で約 3 秒
+static const uint32_t REINIT_GAP = 10000;   // 打ち直しの最短間隔
+static int pollMiss = 0;
+static uint32_t lastReinit = 0;
+static void cmdPropInit();
 
 static void pollTick() {
   if (!pollN || millis() - pollLast < pollMs) return;
   pollLast = millis();                 // 周期はサイクル開始基準（間隔ではなくレート）
   uint8_t r[160];
   char line[600];
+  bool gotAny = false;
   for (int i = 0; i < pollN; i++) {
     int n = readTable(pollTbl[i], r, sizeof r, 200);
+    if (n > 0) gotAny = true;
     int p = snprintf(line, sizeof line, "P %lu %02X",
                      (unsigned long)(millis() - pollT0), pollTbl[i]);
     if (n <= 0) p += snprintf(line + p, sizeof line - p, " -");
@@ -305,6 +316,16 @@ static void pollTick() {
   }
   pollCycles++;
   lastKeep = millis();   // 通信自体がセッションを維持する。keep-alive は要らない
+
+  if (gotAny) { pollMiss = 0; return; }
+  if (++pollMiss < POLL_MISS_MAX || millis() - lastReinit < REINIT_GAP) return;
+  const char *m = "reinit: 無応答が続いたので w を打ち直す";
+  logRec(T_NOTE, (const uint8_t *)m, strlen(m));
+  outf("\n**%s**\n", m);
+  lastReinit = millis();
+  pollMiss = 0;
+  propUp = false;
+  cmdPropInit();
 }
 
 static void cmdPoll(char *arg) {
@@ -732,7 +753,7 @@ static void help() {
       "  poll <TT..> [ms]    そのテーブルを周期読みして P 行で流す（既定 200ms）\n"
       "                      BLE が切れても止まらない。rec と併用すると記録も残る\n"
       "  poll off            停止   poll だけで現在の状態\n"
-      "  snap                実在 7 テーブルを 1 回ずつ（走行の前後に。約 0.7 秒）\n"
+      "  snap                実在 7 テーブルを 1 回ずつ（約 0.7 秒）。**auto の起動時に自動で撮る**\n"
       "  auto on [引数]      **キーを回したら自動で w → rec on → poll**（NVS に残る）\n"
       "  auto off            解除   auto だけで状態\n"
       "[標準層] 足場。ELM327 で既に取れているもの\n"
@@ -810,6 +831,10 @@ static void autoStart() {
   char note[96];
   int nl = snprintf(note, sizeof note, "auto seq=%d prop=%s", seq, propUp ? "ok" : "FAIL");
   logRec(T_NOTE, (const uint8_t *)note, nl);
+  /* **実在 7 本のスナップショットを 1 回だけ撮る。** 価値があるのは `0x61`（凍結）が
+   * 走行をまたいで変わったかどうかで、1 走行 1 回あれば足りる。人に押させる理由が無い。
+   * 0.7 秒。独自層が起きていなければ全部タイムアウトするだけなので撮らない。 */
+  if (propUp) cmdSnap();
   if (!propUp)
     out("**独自層が起きない。** 記録は続けるが応答は入らない（要求だけ残る）\n");
   char cmd[64]; strncpy(cmd, pollArg.c_str(), sizeof cmd - 1); cmd[sizeof cmd - 1] = 0;

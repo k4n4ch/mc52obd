@@ -124,7 +124,7 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
   <button id="bStop" class="danger" disabled>記録停止</button>
 </div>
 <div class="row">
-  <button id="bSnap" disabled>snap（走行前後）</button>
+  <button id="bSnap" disabled>snap（手動。通常は不要）</button>
   <button id="bExport" disabled>測位を書き出す</button>
 </div>
 
@@ -175,9 +175,8 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
         回収を始める</b>（走行中も進む）</li>
       <li><code>auto</code> を使っていないなら<b>「記録開始」</b>。チップが赤い
         「記録中」になり、フレーム数が増えるのを確認する</li>
-      <li><b>「snap」を 1 回。</b>走行前のスナップショット</li>
       <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない</li>
-      <li><b>停車したら、エンジンを掛けたまま「snap」→「記録停止」→「未転送を取り込む」</b></li>
+      <li><b>停車したら、エンジンを掛けたまま「記録停止」→「未転送を取り込む」</b></li>
       <li>CRC 一致を確認して<b>キーオフ</b>。<b>転送しきれなければ切ってよい</b> ——
         次回接続時に裏で続ける</li>
       <li>「測位を書き出す」で CSV と GPX が端末に落ちる
@@ -200,6 +199,10 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
         取り忘れると走行 1 本が無駄になる</li>
       <li>接続が切れても<b>基板は記録を続ける</b>（<code>poll</code> も <code>rec</code> も
         BLE 非依存）。切れて困るのは測位ログだけ</li>
+      <li><b>snap は押さなくていい。</b>基板が起動時に自動で撮る（<code>auto</code> 有効時）。
+        価値があるのは凍結テーブルが走行をまたいで変わったかどうかで、1 走行 1 回で足りる</li>
+      <li><b>セッションが落ちても基板が自分で張り直す。</b>無応答が約 3 秒続いたら
+        <code>w</code> を打ち直し、ログに印を残す。始動のクランキングで落ちた場合の保険</li>
       <li><b>このページが繋いでいるあいだ、Mac からは基板が見つからない。</b>
         接続中は広告が止まるため。電源が入っていないのと区別が付かないので、
         Mac で作業するときはまずこのページを閉じる</li>
