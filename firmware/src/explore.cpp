@@ -559,6 +559,19 @@ static const uint8_t LOG_VER = 1;
 static char pendingNote[200];
 static int pendingNoteLen = 0;
 
+/* **256KB ごとにファイルを切り替える。** 背景転送は `poll` 稼働中 1.3KB/s しか出ないので、
+ * 1 本が大きいと接続した走行の中で取り切れず、やがて退避に食われる。256KB なら
+ * 18.5KB/分で約 14 分ぶん、背景転送 3.3 分で 1 本。**取り直しの損失に上限がつく。**
+ *
+ * 名前は `<base>_PP.bin`。名前順が生成順と一致するので退避の順序も壊れない。
+ * **`dt` の連鎖は切らない** —— `lastRecMs` を持ち越すので、パートの境目に隙間が出ない。
+ * 壁時計は各パートのヘッダに入れる。スマホが一度繋がって `time` が入れば、
+ * **以後のパートはアンカー頼みでなく自前の絶対時刻を持つ。** */
+static const size_t LOG_PART_MAX = 256UL * 1024UL;
+static char logBase[40] = "";
+static int logPart = 0;
+static uint32_t logTotal = 0;      // セッション通算（パートをまたぐ）
+
 static File logFile;
 static bool recOn = false;
 static uint8_t logBuf[4096];
@@ -569,6 +582,7 @@ static uint32_t lastRecMs = 0, lastFlush = 0, logBytes = 0, logRecs = 0;
  * 自動記録では誰も気付かない。短く書けたら声を上げて記録を止める —— 切り詰められた
  * ファイルを「取れているつもり」で持ち帰るより、止まったと分かる方がよい。 */
 static bool logFull = false;
+static void rollLog();
 static void logFlush() {
   if (!logFile || !logLen) return;
   size_t w = logFile.write(logBuf, logLen);
@@ -583,8 +597,10 @@ static void logFlush() {
     return;
   }
   logBytes += logLen;
+  logTotal += logLen;
   logLen = 0;
   lastFlush = millis();
+  if (logBytes >= LOG_PART_MAX) rollLog();
 }
 static void logRec(uint8_t type, const uint8_t *d, size_t n) {
   if (!recOn || !logFile || n > 255) return;
@@ -674,6 +690,33 @@ static void makeRoom(const char *keep) {
   }
 }
 
+/* パートを 1 つ開く。先頭に 9 バイトのヘッダを書く。
+ * **`lastRecMs` と `logRecs` は触らない** —— `dt` の連鎖と通算を保つため。 */
+static bool openLogPart() {
+  char path[64];
+  snprintf(path, sizeof path, "/%s_%02d.bin", logBase, ++logPart);
+  logFile = LittleFS.open(path, "w");
+  if (!logFile) return false;
+  time_t t = time(nullptr);
+  uint8_t hdr[9] = {'M','C','5','2', LOG_VER,
+                    (uint8_t)(t & 0xFF), (uint8_t)((t >> 8) & 0xFF),
+                    (uint8_t)((t >> 16) & 0xFF), (uint8_t)((t >> 24) & 0xFF)};
+  logFile.write(hdr, sizeof hdr);
+  logLen = 0; logBytes = sizeof hdr; logFull = false; lastFlush = millis();
+  return true;
+}
+
+static void rollLog() {
+  logFile.close();
+  if (!openLogPart()) {
+    outf("**次のパートを作れない。記録を止める**\n");
+    recOn = false; return;
+  }
+  outf("パートを切り替えた → %s_%02d.bin\n", logBase, logPart);
+  const char *m = "roll: 次のパートへ";
+  logRec(T_NOTE, (const uint8_t *)m, strlen(m));
+}
+
 static void cmdRec(const char *argIn) {
   /* `rec on <名前>` の `on` を名前として食っていた（実機で `on bench.bin` が
    * 出来た）。先頭の語を見てから残りを名前にする。名前に空白は許さない —— 
@@ -688,12 +731,14 @@ static void cmdRec(const char *argIn) {
   if (!strncmp(arg, "off", 3) || *arg == '0') {
     if (!recOn) { out("記録していない\n"); return; }
     logFlush(); logFile.close(); recOn = false;
-    outf("停止。%lu レコード / %lu バイト\n", (unsigned long)logRecs, (unsigned long)logBytes);
+    outf("停止。%lu レコード / 通算 %lu バイト / %d パート\n",
+         (unsigned long)logRecs, (unsigned long)logTotal, logPart);
     return;
   }
   if (recOn) {
-    outf("記録中 %s（%lu レコード / %lu バイト）\n",
-         logFile ? logFile.name() : "?", (unsigned long)logRecs, (unsigned long)logBytes);
+    outf("記録中 %s（%lu レコード / 通算 %lu バイト / パート %d）\n",
+         logFile ? logFile.name() : "?", (unsigned long)logRecs,
+         (unsigned long)logTotal, logPart);
     return;
   }
   /* **引数なしの `rec` で記録を始めない。** 状態確認のつもりで打つと黙って
@@ -709,14 +754,10 @@ static void cmdRec(const char *argIn) {
              tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
   }
   makeRoom(name);
-  logFile = LittleFS.open(name, "w");
-  if (!logFile) { outf("作れない: %s\n", name); return; }
-  logFull = false;
-  uint8_t hdr[9] = {'M','C','5','2', LOG_VER,
-                    (uint8_t)(t & 0xFF), (uint8_t)((t >> 8) & 0xFF),
-                    (uint8_t)((t >> 16) & 0xFF), (uint8_t)((t >> 24) & 0xFF)};
-  logFile.write(hdr, sizeof hdr);
-  logLen = 0; logBytes = sizeof hdr; logRecs = 0; lastRecMs = 0; lastFlush = millis();
+  strncpy(logBase, name + (*name == '/' ? 1 : 0), sizeof logBase - 1);
+  char *dot = strrchr(logBase, '.'); if (dot) *dot = 0;
+  logPart = 0; logTotal = 0; logRecs = 0; lastRecMs = 0;
+  if (!openLogPart()) { outf("作れない: %s\n", logBase); return; }
   recOn = true;
   if (pendingNoteLen) {
     logRec(T_NOTE, (const uint8_t *)pendingNote, pendingNoteLen);
@@ -788,6 +829,15 @@ static void cmdGet(const char *name) {
 
 static void getTick() {
   if (!getOn) return;
+  /* **BLE が切れたら転送を捨てる。** `outBle()` は接続が無いと Serial へ落とすので、
+   * 放っておくと誰も受け取らないデータを 115200bps で吐き続け（1 行 14.8ms）、
+   * 残りのファイルぶんだけ `poll` の取り分を食う。1MB なら約 170 秒。 */
+  if (!bleConn) {
+    getFile.close(); getOn = false;
+    Serial.printf("BLE が切れたので転送を中止した（%lu バイト送信済み）\n",
+                  (unsigned long)getSent);
+    return;
+  }
   uint8_t in[GET_CHUNK];
   char line[GET_CHUNK / 3 * 4 + 8];
   uint32_t t0 = millis();
