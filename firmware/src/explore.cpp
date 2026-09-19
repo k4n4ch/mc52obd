@@ -94,6 +94,15 @@ static uint8_t csumAdd(const uint8_t *b, size_t n){ uint8_t s = 0; for (size_t i
 // 記録は下で定義するが、xfer から呼ぶので前方宣言する
 static const uint8_t T_PROP = 0x01, T_OBD = 0x02, T_REQ = 0x03, T_NOTE = 0x10;
 static void logRec(uint8_t type, const uint8_t *d, size_t n);
+/* **応答が返るまで保存しない。** 電源が入っている間は要求を投げ続けるが、
+ * 中身の無いログを育てても仕方がない（机の上や、ハーネスが死んだときに
+ * 要求だけのファイルが 155KB/時で育っていた）。
+ * **最初に応答が返った、その要求から記録を始める。** 対で残るので解析側も困らない。 */
+static bool recOn = false;             // 記録中（下の記録節で使う）
+static bool recArmed = false;          // 頼まれたが、まだ応答が来ていない
+static uint8_t pendReq[16];
+static size_t pendReqLen = 0;
+static void armFire();                 // ファイルを開いて、保留していた要求を書く
 
 static void klRaw()  { KL.end(); pinMode(PIN_KL_TX, OUTPUT); }
 static void klUart() { KL.begin(klBaud, SERIAL_8N1, PIN_KL_RX, PIN_KL_TX); }
@@ -118,7 +127,11 @@ static int echoBad = 0, echoGot = 0;
 static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
                 uint32_t wait_ms, bool lenAt2) {
   while (KL.available()) KL.read();
-  logRec(T_REQ, req, n);            // **要求も残す。** 何を訊いたかが対で要る
+  if (recOn) logRec(T_REQ, req, n);   // **要求も残す。** 何を訊いたかが対で要る
+  else if (recArmed) {                // まだ開いていない。応答が来たら書けるよう保留
+    pendReqLen = n < sizeof pendReq ? n : sizeof pendReq;
+    memcpy(pendReq, req, pendReqLen);
+  }
   KL.write(req, n); KL.flush();
   uint32_t t0 = millis();
   echoBad = 0; echoGot = 0;
@@ -136,10 +149,17 @@ static int xfer(const uint8_t *req, size_t n, uint8_t *resp, size_t cap,
     if (got < cap) resp[got] = c;
     got++;
     if (lenAt2 && got == 2) { need = c; if (need < 3 || need > cap) return -2; }
-    if (need && got >= need) { logRec(lenAt2 ? T_PROP : T_OBD, resp, need); return (int)need; }
+    if (need && got >= need) {
+      if (recArmed) armFire();        // 最初の応答。ここから記録が始まる
+      logRec(lenAt2 ? T_PROP : T_OBD, resp, need);
+      return (int)need;
+    }
     t0 = millis();
   }
-  if (got) logRec(lenAt2 ? T_PROP : T_OBD, resp, got > cap ? cap : got);
+  if (got) {
+    if (recArmed) armFire();
+    logRec(lenAt2 ? T_PROP : T_OBD, resp, got > cap ? cap : got);
+  }
   return got ? (int)got : 0;           // 長さ不明のときは静かになった時点の全量
 }
 
@@ -573,7 +593,6 @@ static int logPart = 0;
 static uint32_t logTotal = 0;      // セッション通算（パートをまたぐ）
 
 static File logFile;
-static bool recOn = false;
 static uint8_t logBuf[4096];
 static size_t logLen = 0;
 static uint32_t lastRecMs = 0, lastFlush = 0, logBytes = 0, logRecs = 0;
@@ -734,12 +753,14 @@ static void cmdRec(const char *argIn) {
   }
   for (char *p = arg; *p; p++) if (*p == ' ') *p = '_';
   if (!strncmp(arg, "off", 3) || *arg == '0') {
+    if (recArmed) { recArmed = false; out("待機を解除した\n"); return; }
     if (!recOn) { out("記録していない\n"); return; }
     logFlush(); logFile.close(); recOn = false;
     outf("停止。%lu レコード / 通算 %lu バイト / %d パート\n",
          (unsigned long)logRecs, (unsigned long)logTotal, logPart);
     return;
   }
+  if (recArmed) { outf("待機中 %s（応答待ち。まだ保存していない）\n", logBase); return; }
   if (recOn) {
     outf("記録中 %s（%lu レコード / 通算 %lu バイト / パート %d）\n",
          logFile ? logFile.name() : "?", (unsigned long)logRecs,
@@ -758,18 +779,32 @@ static void cmdRec(const char *argIn) {
     snprintf(name, sizeof name, "/%04d%02d%02d_%02d%02d%02d.bin",
              tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
   }
-  makeRoom(name);
+  /* **ここではファイルを開かない。** 応答が 1 つも返らないまま要求だけが溜まるのを
+   * 避けるため、`armFire()`（最初の応答）まで待つ。 */
   strncpy(logBase, name + (*name == '/' ? 1 : 0), sizeof logBase - 1);
   char *dot = strrchr(logBase, '.'); if (dot) *dot = 0;
+  recArmed = true; pendReqLen = 0;
+  outf("記録を待機（%s）。**最初の応答が返った要求から保存する**%s\n", logBase,
+       t < 1700000000 ? "  ★ 時刻が未設定。time <unix> で合わせる" : "");
+}
+
+/* 最初の応答が返った瞬間に呼ばれる。ここでファイルを開き、**その応答を引き出した
+ * 要求**を先に書く。対で残るので解析側が「何を訊いて何が返ったか」を失わない。 */
+static void armFire() {
+  recArmed = false;
+  char base[48]; strncpy(base, logBase, sizeof base - 1); base[sizeof base - 1] = 0;
+  char path[64]; snprintf(path, sizeof path, "/%s", base);
+  makeRoom(path);
   logPart = 0; logTotal = 0; logRecs = 0; lastRecMs = 0;
-  if (!openLogPart()) { outf("作れない: %s\n", logBase); return; }
+  if (!openLogPart()) { outf("**作れない: %s。記録しない**\n", base); return; }
   recOn = true;
   if (pendingNoteLen) {
     logRec(T_NOTE, (const uint8_t *)pendingNote, pendingNoteLen);
     pendingNoteLen = 0;
   }
-  outf("記録開始 %s（壁時計 %lu）%s\n", name, (unsigned long)t,
-       t < 1700000000 ? "  ★ 時刻が未設定。time <unix> で合わせる" : "");
+  time_t t = time(nullptr);
+  outf("記録開始 %s_01.bin（壁時計 %lu）\n", base, (unsigned long)t);
+  if (pendReqLen) { logRec(T_REQ, pendReq, pendReqLen); pendReqLen = 0; }
 }
 
 static void cmdLs() {
@@ -1058,13 +1093,14 @@ static void autoStart() {
   prefs.begin("mc52", false); prefs.putInt("aseq", seq); prefs.end();
   curSeq = seq;                   // 台帳の鍵。`time` が入ったときに使う
   char name[32]; snprintf(name, sizeof name, "auto%04d", seq);
-  cmdRec(name);
+  cmdRec(name);                       // 武装するだけ。最初の応答でファイルが開く
   char note[96];
   int nl = snprintf(note, sizeof note, "auto seq=%d prop=%s", seq, propUp ? "ok" : "FAIL");
-  logRec(T_NOTE, (const uint8_t *)note, nl);
+  strncpy(pendingNote, note, sizeof pendingNote - 1);   // 開いたら先頭に書く
+  pendingNoteLen = nl < (int)sizeof pendingNote ? nl : (int)sizeof pendingNote - 1;
   /* **実在 7 本のスナップショットを 1 回だけ撮る。** 価値があるのは `0x61`（凍結）が
    * 走行をまたいで変わったかどうかで、1 走行 1 回あれば足りる。人に押させる理由が無い。
-   * 0.7 秒。独自層が起きていなければ全部タイムアウトするだけなので撮らない。 */
+   * 0.7 秒。**武装の後に撮るので、応答があればこの snap から記録が始まる。** */
   if (propUp) cmdSnap();
   if (!propUp)
     out("**独自層が起きない。** 記録は続けるが応答は入らない（要求だけ残る）\n");
