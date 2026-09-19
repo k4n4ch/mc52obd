@@ -242,7 +242,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 </div>
 
 <script>
-const VERSION = 'v20260919a';
+const VERSION = 'v20260919b';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -336,8 +336,27 @@ function feed(v) {
       say(line + '\n');
       // 記録中のファイルは転送してはいけない（追記中のものを吸うと壊れる）
       const m = line.match(/^記録中 \/?(\S+\.bin)/);
-      if (m) activeLog = m[1];
-      if (/^記録していない/.test(line)) activeLog = null;
+      if (m) {
+        activeLog = m[1];
+        /* **基板が自分で記録している状態に画面を合わせる。** `auto` が有効だと
+         * キーを回した時点で記録が始まっているので、ページが開始していなくても
+         * 記録中として見せる。消灯のままだと「記録されていない」と誤解する。
+         * 測位もここで始める —— `REC` を押さない運用では他に始める契機が無い。 */
+        if (!recOn) {
+          recOn = true;
+          chip($('cRec'), true, 'REC', 'rec');
+          $('bRec').classList.add('active');
+          startGps();
+        }
+      }
+      if (/^記録していない/.test(line)) {
+        activeLog = null;
+        if (recOn) {
+          recOn = false;
+          chip($('cRec'), false, 'REC');
+          $('bRec').classList.remove('active');
+        }
+      }
     }
   }
 }
