@@ -555,6 +555,9 @@ static void cmdOta(const char *arg) {
  * 書き出しは 4KB たまるか 5 秒で追記する。IG 連動で電源が落ちる基板なので、
  * 停止を押すまで 1 バイトも書かない作りだと切った瞬間に全部消える。 */
 static const uint8_t LOG_VER = 1;
+// makeRoom が消したものは、記録が始まってからでないと書けない
+static char pendingNote[200];
+static int pendingNoteLen = 0;
 
 static File logFile;
 static bool recOn = false;
@@ -562,10 +565,23 @@ static uint8_t logBuf[4096];
 static size_t logLen = 0;
 static uint32_t lastRecMs = 0, lastFlush = 0, logBytes = 0, logRecs = 0;
 
+/* **書き込みの戻り値を見る。** 見ていなかったので、満杯になると記録が静かに落ちていた。
+ * 自動記録では誰も気付かない。短く書けたら声を上げて記録を止める —— 切り詰められた
+ * ファイルを「取れているつもり」で持ち帰るより、止まったと分かる方がよい。 */
+static bool logFull = false;
 static void logFlush() {
   if (!logFile || !logLen) return;
-  logFile.write(logBuf, logLen);
+  size_t w = logFile.write(logBuf, logLen);
   logFile.flush();
+  if (w < logLen) {
+    logFull = true;
+    outf("**書き込めない（%u/%u バイト）。記録を止める**\n", (unsigned)w, (unsigned)logLen);
+    const char *m = "disk full: 記録を打ち切った";
+    logLen = 0;
+    logRec(T_NOTE, (const uint8_t *)m, strlen(m));   // 入らないかもしれないが試す
+    logFile.close(); recOn = false;
+    return;
+  }
   logBytes += logLen;
   logLen = 0;
   lastFlush = millis();
@@ -584,6 +600,54 @@ static void logRec(uint8_t type, const uint8_t *d, size_t n) {
   logRecs++;
 }
 static void logTick() { if (recOn && millis() - lastFlush > 5000) logFlush(); }
+
+/* **場所を空ける。** 12.2MB ÷ 18.5KB/分 ≒ 11 時間ぶんしか入らず、`auto` はキーを回す
+ * たびにファイルを作るので放っておけば埋まる。溢れてから捨てるのではなく、
+ * **新しい記録を始めるときに古いものを消す** —— 新しいデータの方が価値が高く、
+ * 回収はスマホと Mac の二重経路がある。
+ *
+ * **消すのは自動生成の名前だけ**（`auto*` と `r*`）。手で名付けた探索ログ
+ * （`probe.bin` など）は触らない。名前順は生成順と一致する（連番と日時）。
+ * 消したものは記録の先頭に `note` で残す。 */
+static const size_t LOG_RESERVE = 1024UL * 1024UL;   // これだけ空けてから始める
+
+static bool autoName(const char *n) {
+  if (!strncmp(n, "auto", 4)) return true;
+  return n[0] == 'r' && strlen(n) > 8 && isdigit((unsigned char)n[1]);
+}
+
+static void makeRoom(const char *keep) {
+  char deleted[160]; int dp = 0;
+  for (int guard = 0; guard < 64; guard++) {
+    size_t freeB = LittleFS.totalBytes() - LittleFS.usedBytes();
+    if (freeB >= LOG_RESERVE) break;
+    char oldest[64] = "";
+    File root = LittleFS.open("/");
+    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
+      const char *n = f.name();
+      if (!autoName(n)) continue;
+      if (keep && !strcmp(n, keep + (*keep == '/' ? 1 : 0))) continue;
+      if (!*oldest || strcmp(n, oldest) < 0) { strncpy(oldest, n, sizeof oldest - 1); }
+    }
+    if (!*oldest) {
+      outf("**空きが %u KB しかないが、消せる自動ログが無い**\n", (unsigned)(freeB / 1024));
+      break;
+    }
+    char path[72]; snprintf(path, sizeof path, "/%s", oldest);
+    size_t sz = 0;
+    { File f = LittleFS.open(path, "r"); if (f) sz = f.size(); }
+    LittleFS.remove(path);
+    outf("場所を空けるため消した %s（%u KB）\n", oldest, (unsigned)(sz / 1024));
+    if (dp < (int)sizeof deleted - 24)
+      dp += snprintf(deleted + dp, sizeof deleted - dp, "%s%s", dp ? "," : "", oldest);
+  }
+  if (dp) {
+    char m[200];
+    int n = snprintf(m, sizeof m, "makeRoom: %s を消した", deleted);
+    strncpy(pendingNote, m, sizeof pendingNote - 1);   // 記録開始後に書く
+    pendingNoteLen = n < (int)sizeof pendingNote ? n : (int)sizeof pendingNote - 1;
+  }
+}
 
 static void cmdRec(const char *argIn) {
   /* `rec on <名前>` の `on` を名前として食っていた（実機で `on bench.bin` が
@@ -619,14 +683,20 @@ static void cmdRec(const char *argIn) {
     snprintf(name, sizeof name, "/%04d%02d%02d_%02d%02d%02d.bin",
              tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
   }
+  makeRoom(name);
   logFile = LittleFS.open(name, "w");
   if (!logFile) { outf("作れない: %s\n", name); return; }
+  logFull = false;
   uint8_t hdr[9] = {'M','C','5','2', LOG_VER,
                     (uint8_t)(t & 0xFF), (uint8_t)((t >> 8) & 0xFF),
                     (uint8_t)((t >> 16) & 0xFF), (uint8_t)((t >> 24) & 0xFF)};
   logFile.write(hdr, sizeof hdr);
   logLen = 0; logBytes = sizeof hdr; logRecs = 0; lastRecMs = 0; lastFlush = millis();
   recOn = true;
+  if (pendingNoteLen) {
+    logRec(T_NOTE, (const uint8_t *)pendingNote, pendingNoteLen);
+    pendingNoteLen = 0;
+  }
   outf("記録開始 %s（壁時計 %lu）%s\n", name, (unsigned long)t,
        t < 1700000000 ? "  ★ 時刻が未設定。time <unix> で合わせる" : "");
 }
