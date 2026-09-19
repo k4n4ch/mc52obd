@@ -5,7 +5,7 @@ Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるか
 | | | 相手 |
 |---|---|---|
 | **走行中のモニタ** | <https://k4n4ch.github.io/mc52obd/> | ELM327 |
-| **走行の記録を仕込む** | <https://k4n4ch.github.io/mc52obd/rec.html> | 自作基板（Track B） |
+| **基板のモニタと記録** | <https://k4n4ch.github.io/mc52obd/rec.html> | 自作基板（Track B） |
 | **ログビュワー** | <https://k4n4ch.github.io/mc52obd/map.html> | — |
 
 モニタと記録ページは **Android Chrome + HTTPS** が要る（Web Bluetooth が iOS Safari

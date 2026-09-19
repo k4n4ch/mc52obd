@@ -1,25 +1,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>CB250R 記録</title>
+<title>CB250R 基板</title>
 <!--
-  走行の記録を仕込むための最小ページ。**Android Chrome（Web Bluetooth）前提。**
+  自作基板（Track B）で独自層を叩くモニタ兼記録ページ。**Android Chrome
+  （Web Bluetooth）前提。** ELM327 経路の index.html とは排他で同時には使えない
+  （同じ K 線を掴み、独自層と標準層はセッションとして排他）。
 
-  基板（MC52-explore）は BLE が切れても poll と rec を回し続けるので、**このページの
-  仕事は 3 つだけ**。
+  **ELM327 経路より優れている点が 3 つある**（docs/FINDINGS.md）。
 
-    1. 基板に壁時計を入れる（基板に RTC が無い。GPS ログとの突合に要る）
-    2. 記録を開始する（rec と poll は RAM なのでキーオフで消える）
-    3. **測位ログを端末の時計で残す**
+    ① 7 つの値が 1 フレームで同時に来る → **取得時刻ずれの補正が不要**
+       （ELM327 は PID ごとに別リクエストで、加速 +7.3% / 減速 −5.8% の誤差が出る）
+    ② 駆動が繋がっているかが取れる → **比推定の誤答を弾ける**（実走で 8.4% あった）
+    ③ 基板が単独で記録する → **表示が落ちてもログは残る**
 
-  3 が要るのは、独自層の車速バイトの校正に GPS しか使えないため —— 標準層の `0D` は
-  セッションが排他で同じ走行では読めない（`docs/FINDINGS.md`）。基板の時計もこのページが
-  入れるので、**両方のログが同じ時間軸に乗る**。
+  ③のおかげで、このページの仕事は「表示」と「回収」に絞れる。
 
-  **接続が切れても走行の記録は続く。** 切れて困るのは測位ログだけなので、画面を
-  点けたままにする（Screen Wake Lock）。
+    - 基板は電源が入ったら自分で記録を始める（auto）
+    - 接続すると壁時計と note t=<epoch> のアンカーが入る（基板に RTC が無い）
+    - poll の P 行を解釈してモニタ表示する
+    - 未転送のログを **poll と並行して裏で回収する**（基板側の転送は非ブロッキング）
 
-  解釈は一切しない。生の hex と、接続してから動いたバイトを強調するだけ。バイト配置が
-  未確定なので、意味付けを画面に焼くと外れたときに嘘になる。
+  **解釈を持つのはモニタ表示だけ。** 計測モードの生フレーム格子は解釈を含まないので、
+  バイト配置の理解が外れても間違いにならない性質を保ってある。
 -->
 <style>
 :root{
@@ -66,6 +68,17 @@ input{width:100%;background:#0c1016;color:var(--fg);border:1px solid var(--line)
   border-radius:.4rem;padding:.55rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}
 .note{font-size:.68rem;color:var(--dim);line-height:1.5}
 #restore{border-color:var(--warn)}
+#mode{display:flex;gap:.3rem;margin-bottom:.6rem}
+#mode button{min-height:2.2rem;font-size:.75rem}
+#mode button.sel{border-color:var(--accent);color:var(--accent);background:#0d1725}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
+.cell{background:#0c1016;border:1px solid var(--line);border-radius:.5rem;padding:.5rem .6rem}
+.cell .k{font-size:.66rem;color:var(--dim)}
+.cell .v{font-size:1.5rem;font-weight:600;line-height:1.25}
+.cell .u{font-size:.7rem;color:var(--dim);margin-left:.15rem}
+.cell.wide{grid-column:1/-1}
+.big{font-size:3.4rem;font-weight:700;line-height:1;text-align:center}
+.big.dim{color:var(--dim)}
 details{font-size:.72rem}
 details+details{margin-top:.5rem}
 summary{color:var(--accent);cursor:pointer;padding:.15rem 0;font-weight:600}
@@ -76,14 +89,34 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
   background:#0c1016;border:1px solid var(--line);border-radius:.2rem;padding:0 .2rem}
 </style>
 
-<h1>CB250R 記録<span id="ver"></span></h1>
+<h1>CB250R 基板<span id="ver"></span></h1>
 
 <div id="status">
   <div class="chip" id="cBle"><i class="dot"></i><span>未接続</span></div>
   <div class="chip" id="cRec"><i class="dot"></i><span>記録なし</span></div>
   <div class="chip" id="cGps"><i class="dot"></i><span>測位なし</span></div>
   <div class="chip" id="cFrm"><i class="dot"></i><span>0 フレーム</span></div>
+  <div class="chip" id="cXfer"><i class="dot"></i><span>未転送なし</span></div>
 </div>
+
+<div id="mode">
+  <button id="mMon" class="sel">モニタ</button>
+  <button id="mRaw">計測（生フレーム）</button>
+</div>
+
+<section id="panMon">
+  <div class="cell wide" style="background:transparent;border:0;padding:0">
+    <div class="k" style="text-align:center">ギヤ</div>
+    <div class="big dim" id="mGear">—</div>
+    <div class="k" style="text-align:center" id="mDrive">—</div>
+  </div>
+  <div class="grid" style="margin-top:.5rem">
+    <div class="cell"><div class="k">回転数</div><div class="v"><span id="mRpm">—</span><span class="u">rpm</span></div></div>
+    <div class="cell"><div class="k">車速</div><div class="v"><span id="mSpd">—</span><span class="u">km/h</span></div></div>
+    <div class="cell"><div class="k">水温</div><div class="v"><span id="mEct">—</span><span class="u">℃</span></div></div>
+    <div class="cell"><div class="k">噴射</div><div class="v"><span id="mInj">—</span></div></div>
+  </div>
+</section>
 
 <div class="row">
   <button id="bConn" class="primary">基板に接続</button>
@@ -104,9 +137,18 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
   </div>
 </section>
 
-<section>
+<section id="panRaw" hidden>
   <h2>生フレーム（接続してから動いたバイトを強調）</h2>
   <div class="frame" id="frames"><i>まだ来ていない</i></div>
+</section>
+
+<section>
+  <h2>基板に残っているログ</h2>
+  <div class="note" id="pending">（なし）</div>
+  <div class="row" style="margin-top:.4rem">
+    <button id="bLs" disabled>一覧を取り直す</button>
+    <button id="bXfer" disabled>未転送を取り込む</button>
+  </div>
 </section>
 
 <section>
@@ -127,23 +169,26 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
   <details>
     <summary>操作手順</summary>
     <ol class="steps">
-      <li><b>キー ON → エンジン始動。</b>この順。記録設定は基板の RAM にあるので、
-        <b>始動のクランキングで再起動すると消える</b></li>
-      <li><b>「基板に接続」。</b>Chrome のデバイス選択が出る。接続した瞬間に
-        <b>壁時計が入る</b></li>
+      <li><b>キー ON → エンジン始動。</b>基板側で <code>auto</code> を有効にしてあれば
+        ここで既に記録が始まっている</li>
+      <li><b>「基板に接続」。</b>壁時計とアンカーが入り、<b>未転送のログがあれば裏で
+        回収を始める</b>（走行中も進む）</li>
+      <li><code>auto</code> を使っていないなら<b>「記録開始」</b>。チップが赤い
+        「記録中」になり、フレーム数が増えるのを確認する</li>
       <li><b>「snap」を 1 回。</b>走行前のスナップショット</li>
-      <li><b>「記録開始」。</b>チップが赤い「記録中」になり、
-        <b>フレーム数が増えていく</b>のを確認する</li>
-      <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない。
-        画面は点けたままにしてある（測位を止めないため）</li>
-      <li><b>帰着したら、エンジンを切る前に「snap」→「記録停止」</b></li>
-      <li><b>「測位を書き出す」。</b>CSV と GPX が端末に落ちる</li>
-      <li>家で Mac から <code>tools/kllog.py get --all</code></li>
+      <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない</li>
+      <li><b>停車したら、エンジンを掛けたまま「snap」→「記録停止」→「未転送を取り込む」</b></li>
+      <li>CRC 一致を確認して<b>キーオフ</b>。<b>転送しきれなければ切ってよい</b> ——
+        次回接続時に裏で続ける</li>
+      <li>「測位を書き出す」で CSV と GPX が端末に落ちる
     </ol>
   </details>
   <details>
     <summary>押さえておくこと</summary>
     <ul class="steps">
+      <li><b>キーを切ると電源も落ちる。</b>IG ON でエンジンだけ切ることはできないので、
+        転送はエンジンを掛けたまま行う。<b>1 時間の走行で約 73 秒</b>、3 時間なら 3.6 分。
+        長い走行は転送せず切って、次回に裏で回収させる方が現実的</li>
       <li><b>「記録停止」を押さずにキーを切ると末尾 5 秒を失う</b>（書き出しが 5 秒周期）。
         ファイルシステムは壊れないので、失うのは末尾だけ</li>
       <li><b>基板側で <code>auto</code> を有効にしてあると、ファイル名が時刻にならない。</b>
@@ -163,7 +208,7 @@ code{font-family:ui-monospace,Menlo,monospace;color:var(--fg);
 </section>
 
 <script>
-const VERSION = 'v20260917a';
+const VERSION = 'v20260919a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -216,9 +261,19 @@ async function connect() {
     txChar.addEventListener('characteristicvaluechanged', e => feed(e.target.value));
     chip($('cBle'), true, dev.name || '接続');
     $('bStart').disabled = $('bStop').disabled = $('bSnap').disabled = false;
+    $('bLs').disabled = $('bXfer').disabled = false;
     // **接続したら壁時計を入れる。** 基板に RTC が無いので、これをやらないと
     // 記録した時刻を測位ログと突き合わせられない
-    await send('time ' + Math.floor(Date.now() / 1000));
+    const epoch = Math.floor(Date.now() / 1000);
+    await send('time ' + epoch);
+    // **自動記録だとファイル先頭の時刻が未設定のまま開いている。**
+    // ログの途中に絶対時刻の基準点を 1 個打てば、dt の積算から前後どちらにも戻せる
+    await send('note t=' + epoch);
+    await send('rec');                 // 記録中のファイル名を知る（転送から除く）
+    await new Promise(r => setTimeout(r, 400));
+    queue = [];
+    await send('ls');                  // 未転送を洗い出して自動で回収に入る
+    setTimeout(drain, 1200);
   } catch (e) {
     say('接続できない: ' + e.message + '\n');
   }
@@ -240,7 +295,15 @@ function feed(v) {
     const line = rxBuf.slice(0, i).replace(/\r$/, '');
     rxBuf = rxBuf.slice(i + 1);
     if (line.startsWith('P ')) onFrame(line);
-    else if (line.trim()) say(line + '\n');
+    else if (xferLine(line)) { renderPending(); }
+    else if (lsLine(line)) { /* 一覧は表示側で持つ */ }
+    else if (line.trim()) {
+      say(line + '\n');
+      // 記録中のファイルは転送してはいけない（追記中のものを吸うと壊れる）
+      const m = line.match(/^記録中 \/?(\S+\.bin)/);
+      if (m) activeLog = m[1];
+      if (/^記録していない/.test(line)) activeLog = null;
+    }
   }
 }
 
@@ -258,7 +321,9 @@ function onFrame(line) {
   t.cur = by;
   by.forEach((h, k) => { (t.seen[k] ||= new Set()).add(h); });
   chip($('cFrm'), true, frames + ' フレーム');
+  onMonFrame(tt, by);
   render();
+  renderMon();
 }
 
 let renderAt = 0, renderTimer = null;
@@ -278,6 +343,215 @@ function render() {
     out.push('<i>' + tt + '</i> ' + hex);
   }
   $('frames').innerHTML = out.join('<br>') || '<i>まだ来ていない</i>';
+}
+
+/* ══════════════════════════════════════════════════════════
+ * モニタ表示
+ *
+ * **解釈を持つのはここだけ。** 計測モードの生フレーム格子は解釈を含まないので、
+ * 配置が外れても間違いにならない性質を保ってある。
+ *
+ * ELM327 経路（index.html）との違いは 3 つ。
+ *   ① 7 つの値が 1 フレームで同時に来る → **取得時刻ずれの補正が不要**
+ *      （ELM327 は PID ごとに別リクエストで、加速 +7.3% / 減速 −5.8% の誤差が出る）
+ *   ② 駆動が繋がっているかが取れる → **比推定の誤答を弾ける**
+ *   ③ 基板が単独で記録する → 表示が落ちてもログは残る
+ *
+ * 出すのは 4 項目だけ。進角・吸気圧・スロットル・噴射・電圧は**ログに入るので
+ * 帰ってから見る**。走行中に見て判断に使えないものを画面に出さない。
+ * ══════════════════════════════════════════════════════════ */
+
+// 諸元から決まる定数。車両ごとの較正を要しない（FINDINGS.md）
+const GEAR_RATIO = {1:3.416, 2:2.250, 3:1.650, 4:1.350, 5:1.166, 6:1.038};
+const PRIMARY = 2.807, SECONDARY = 2.571;
+const TIRE_CIRC = Math.PI * (17 * 25.4 + 2 * 150 * 0.60) / 1000;
+const R = {};
+for (const n in GEAR_RATIO) R[n] = PRIMARY * GEAR_RATIO[n] * SECONDARY / (TIRE_CIRC * 60 / 1000);
+const gearK = 1.0057;          // 閉じた定数。較正しない
+
+// 表示車速の補正。**補正するのは表示だけで、ログは基板が生値を記録する**
+const STOCK_FRONT = 14;
+let sprkFront = STOCK_FRONT, speedTrim = 1;
+// localStorage は private window や設定で使えないことがある。**無くても走行は続ける**
+try {
+  sprkFront = parseInt(localStorage.getItem('mc52_sf'), 10) || STOCK_FRONT;
+  speedTrim = parseFloat(localStorage.getItem('mc52_strim')) || 1;
+} catch (e) { /* 既定値で動く */ }
+if (!(speedTrim > 0.8 && speedTrim < 1.25)) speedTrim = 1;
+const speedCorr = () => sprkFront / STOCK_FRONT * speedTrim;
+
+/* `[17]` は切り捨てなので真値は n+0.5。**ただし 0 のときだけ補正しない。**
+ * GPS で検証したところ `[17]`=0 の 992/1068 = 93% が真に停止で、
+ * 0 に +0.5 すると停車中に 1km/h へ張り付く（FINDINGS.md）。 */
+const spdTrue = v => (v === 0 ? 0 : v + 0.5);
+
+/* ギヤ判定。**index 4 があると ELM327 版から 3 つ落とせる。**
+ *   時刻ずれの補間  → 同一フレームなので不要
+ *   回転数 1,700rpm 下限 → クラッチ切りを弾くための下限。index 4 が担う
+ *   判定窓          → 誤答を弾く役から外れ、最近傍だけでよくなる
+ *
+ * 駆動中（index4=00）と分かっているなら、比が窓の外でも段は最近傍で決まる。
+ * ELM327 版は駆動中の 10.0% を窓の外として棄却していた（その多くは変速過渡）。
+ *
+ * **変速レート制限だけは残す。** クラッチを繋いだまま素早く変速すると駆動中の
+ * まま比が飛ぶ。`|Δgear| ≤ max(1, round(Δt/T))` は調整値を持たないので安全。 */
+const SHIFT_MIN_S = 0.5;
+let lastGear = null, lastGearT = 0;
+
+function gearFrom(rpm, raw, drive) {
+  if (drive !== 0x00) { lastGear = null; return null; }   // N・クラッチ・スタンド
+  const spd = spdTrue(raw);
+  if (spd <= 0 || !rpm) return null;
+  const ratio = rpm / spd / gearK;
+  let best = null, bd = Infinity;
+  for (const n in R) {
+    const d = Math.abs(ratio - R[n]);
+    if (d < bd) { bd = d; best = +n; }
+  }
+  const now = performance.now() / 1000;
+  if (lastGear !== null &&
+      Math.abs(best - lastGear) > Math.max(1, Math.round((now - lastGearT) / SHIFT_MIN_S))) {
+    return null;                                          // 飛びすぎ。答えない（last は更新しない）
+  }
+  lastGear = best; lastGearT = now;
+  return best;
+}
+
+const DRIVE_TXT = {0x00: '駆動', 0x01: 'N / クラッチ', 0x03: 'スタンド'};
+let mon = {rpm: null, spd: null, ect: null, gear: null, drive: null, inj: null, at: 0};
+
+function onMonFrame(tt, by) {
+  const b = by.map(h => parseInt(h, 16));
+  if (tt === '11' && b.length >= 25) {
+    mon.rpm = (b[4] << 8) | b[5];
+    mon.spd = b[17];
+    mon.ect = b[9] - 40;
+    mon.inj = (b[18] << 8) | b[19];
+  } else if (tt === 'D1' && b.length >= 11) {
+    mon.drive = b[4];
+  }
+  if (mon.rpm !== null && mon.drive !== null)
+    mon.gear = gearFrom(mon.rpm, mon.spd, mon.drive);
+  mon.at = Date.now();
+}
+
+let monAt = 0, monTimer = null;
+function renderMon() {
+  // **間引くが捨てない。** 単に return すると最後のフレームが描かれず表示が 1 サンプル
+  // 遅れる（`render()` で一度直したのと同じ誤りを再発させた）
+  const dt = Date.now() - monAt;
+  if (dt < 150) {
+    if (!monTimer) monTimer = setTimeout(() => { monTimer = null; renderMon(); }, 150 - dt);
+    return;
+  }
+  monAt = Date.now();
+  const stale = Date.now() - mon.at > 2000;
+  $('mGear').textContent = stale ? '—'
+    : mon.gear !== null ? mon.gear
+    : mon.drive === 0x01 ? 'N' : mon.drive === 0x03 ? 'P' : '—';
+  $('mGear').className = 'big' + (stale ? ' dim' : '');
+  $('mRpm').textContent = stale || mon.rpm === null ? '—' : mon.rpm;
+  $('mSpd').textContent = stale || mon.spd === null ? '—'
+    : Math.round(spdTrue(mon.spd) * speedCorr());
+  $('mEct').textContent = stale || mon.ect === null ? '—' : mon.ect;
+  $('mDrive').textContent = stale ? '—' : (DRIVE_TXT[mon.drive] || '?');
+  $('mInj').textContent = stale || mon.inj === null ? '—'
+    : (mon.inj === 0 ? '燃料カット' : mon.inj);
+}
+
+/* ══════════════════════════════════════════════════════════
+ * 未転送ログの回収
+ *
+ * **基板は何が転送済みかを知らない。** 状態はスマホが持つのが素直で、基板側に
+ * 何も足さずに済む。接続したら `ls` を打ち、CRC 検証済みで保持しているものと
+ * 比べて足りないものを取る。
+ *
+ * 転送は基板側が非ブロッキングなので `poll` と並行して進む —— 走行中でも裏で
+ * 回収できる。キーを切る前に転送しきれなかったぶんの受け皿がこれ。
+ * ══════════════════════════════════════════════════════════ */
+const LS_GOT = 'mc52-got';
+let got = {};
+try { got = JSON.parse(localStorage.getItem(LS_GOT) || '{}'); } catch (e) { got = {}; }
+
+const CRC_TBL = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) c = CRC_TBL[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+let xf = null;           // 転送中 {name, size, b64:[]}
+let queue = [];          // 未転送の名前
+let activeLog = null;    // いま記録中のファイル。**転送してはいけない**
+
+function xferLine(line) {
+  if (line.startsWith('BEGIN ')) {
+    const f = line.split(/\s+/);
+    xf = {name: f[1].replace(/^\//, ''), size: parseInt(f[f.length - 1], 10), b64: []};
+    say(`[転送開始 ${xf.name} ${xf.size}B]\n`);
+    return true;
+  }
+  if (line.startsWith('D ')) { if (xf) xf.b64.push(line.slice(2)); return true; }
+  if (line.startsWith('END ')) {
+    if (!xf) return true;
+    const want = parseInt(line.split(/\s+/)[1], 16);
+    const raw = atob(xf.b64.join(''));
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    const have = crc32(buf);
+    if (have === want && buf.length === xf.size) {
+      got[xf.name] = {size: xf.size, crc: want, at: Date.now()};
+      try { localStorage.setItem(LS_GOT, JSON.stringify(got)); } catch (e) {}
+      dlBin(xf.name, buf);
+      say(`[転送完了 ${xf.name} CRC 一致]\n`);
+    } else {
+      say(`[転送失敗 ${xf.name} ${buf.length}/${xf.size}B CRC ${have.toString(16)}≠${want.toString(16)}]\n`);
+    }
+    xf = null;
+    renderPending();
+    setTimeout(drain, 800);        // 次のファイルへ
+    return true;
+  }
+  return false;
+}
+
+function dlBin(name, buf) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], {type: 'application/octet-stream'}));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/* `ls` の出力を拾う。`  name.bin   12345 バイト` */
+function lsLine(line) {
+  const m = line.match(/^\s+(\S+\.bin)\s+(\d+) バイト\s*$/);
+  if (!m) return false;
+  const [, name, size] = m;
+  if (name !== activeLog && !(got[name] && got[name].size === +size)) {
+    if (!queue.includes(name)) queue.push(name);
+  }
+  renderPending();
+  return true;
+}
+
+function renderPending() {
+  const n = queue.length + (xf ? 1 : 0);
+  chip($('cXfer'), n > 0, n === 0 ? '未転送なし'
+      : xf ? `転送中 ${xf.b64.length * 126 >> 10}KB` : `未転送 ${n} 本`);
+  $('pending').textContent = queue.length ? queue.join(' / ') : '（なし）';
+}
+
+async function drain() {
+  if (xf || !queue.length || !rxChar) return;
+  await send('get ' + queue.shift());
 }
 
 // ── 記録 ──────────────────────────────────────────────
@@ -371,6 +645,14 @@ function exportPts(arr) {
 }
 
 // ── 配線 ──────────────────────────────────────────────
+$('mMon').onclick = () => setMode(true);
+$('mRaw').onclick = () => setMode(false);
+function setMode(monitor) {
+  $('panMon').hidden = !monitor; $('panRaw').hidden = monitor;
+  $('mMon').className = monitor ? 'sel' : ''; $('mRaw').className = monitor ? '' : 'sel';
+}
+$('bLs').onclick = async () => { queue = []; await send('rec'); await send('ls'); };
+$('bXfer').onclick = drain;
 $('bConn').onclick = connect;
 $('bStart').onclick = startRec;
 $('bStop').onclick = stopRec;
