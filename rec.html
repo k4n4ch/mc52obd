@@ -283,7 +283,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
       <li><b>セッションが落ちても基板が自分で張り直す。</b>無応答が約 3 秒続いたら
         <code>w</code> を打ち直し、ログに印を残す</li>
       <li>このページが繋いでいるあいだ、<b>Mac からは基板が見つからない</b>
-        （接続中は広告が止まる）</li>
+        （接続中は広告が止まる）。<b>「切断」を押せばその場で切れる</b></li>
     </ul>
   </details>
 </div>
@@ -331,7 +331,14 @@ async function connect() {
     // 名前で探さないのは、OS 側が古い名前をキャッシュすることがあるため
     dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
     dev.addEventListener('gattserverdisconnected', () => {
-      chip($('cBle'), false, '切断');
+      /* **掴んだままの参照を捨てる。** 残しておくと `send()` が書き込みに行って
+       * 例外になる。**測位は止めない** —— 基板を切っただけで走行の測位を捨てる
+       * 理由が無い（`停止・取込` か `REC` で止める）。 */
+      rxChar = txChar = null;
+      if (xf) { xf = null; say('[転送を中断した]\n'); }
+      chip($('cBle'), false, 'BLE');
+      $('bConn').textContent = '接続';
+      $('bConn').classList.remove('active');
       $('bRec').disabled = $('bSnap').disabled = $('bXfer').disabled = true;
       $('bLs').disabled = $('bRmGot').disabled = $('bRmAll').disabled = true;
       say('\n[BLE 切断。基板の記録は続いている]\n');
@@ -342,6 +349,7 @@ async function connect() {
     await txChar.startNotifications();
     txChar.addEventListener('characteristicvaluechanged', e => feed(e.target.value));
     chip($('cBle'), true, 'BLE');
+    $('bConn').textContent = '切断';
     $('bConn').classList.add('active');      // 状態ボタンは効力が続く間ずっと点灯
     $('bRec').disabled = $('bSnap').disabled = false;
     $('bLs').disabled = $('bXfer').disabled = false;
@@ -965,7 +973,12 @@ function exportPts(arr) {
 }
 
 // ── 配線 ──────────────────────────────────────────────
-$('bConn').onclick = connect;
+/* **接続は状態ボタン。** 押すと切れる。接続中は基板の広告が止まるので、
+ * Mac から見たいときはここで切る（`SPEC.md` §8）。 */
+$('bConn').onclick = () => {
+  if (dev && dev.gatt && dev.gatt.connected) { try { dev.gatt.disconnect(); } catch (e) {} }
+  else connect();
+};
 $('bRec').onclick = toggleRec;
 $('bXfer').onclick = finishRide;
 $('bLog').onclick = () => {
