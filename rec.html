@@ -229,6 +229,9 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
         ファイルシステムは壊れないので失うのは末尾だけ</li>
       <li><b>測位は車速校正の唯一の基準。</b>独自層の車速バイトは標準層の <code>0D</code> と
         同じ信号だが、<code>0D</code> はセッション排他で同じ走行では読めない</li>
+      <li><b>初回接続では取り込まない。</b>そのとき基板にあったものを既知として登録する
+        だけ（基準）。<b>以後に現れた新しいログだけ</b>自動で取り込む。個別に欲しければ
+        コマンド欄に <code>get &lt;名前&gt;</code></li>
       <li><b>snap は押さなくていい。</b>基板が起動時に自動で撮る</li>
       <li><b>セッションが落ちても基板が自分で張り直す。</b>無応答が約 3 秒続いたら
         <code>w</code> を打ち直し、ログに印を残す</li>
@@ -303,9 +306,9 @@ async function connect() {
     await send('note t=' + epoch);
     await send('rec');                 // 記録中のファイル名を知る（転送から除く）
     await new Promise(r => setTimeout(r, 400));
-    queue = [];
+    queue = []; seen = {};
     await send('ls');                  // 未転送を洗い出して自動で回収に入る
-    setTimeout(drain, 1200);
+    setTimeout(() => { sealBaseline(); drain(); }, 1800);
   } catch (e) {
     say('接続できない: ' + e.message + '\n');
   }
@@ -530,9 +533,19 @@ function renderMon() {
  * 転送は基板側が非ブロッキングなので `poll` と並行して進む —— 走行中でも裏で
  * 回収できる。キーを切る前に転送しきれなかったぶんの受け皿がこれ。
  * ══════════════════════════════════════════════════════════ */
-const LS_GOT = 'mc52-got';
+const LS_GOT = 'mc52-got', LS_BASE = 'mc52-base';
 let got = {};
-try { got = JSON.parse(localStorage.getItem(LS_GOT) || '{}'); } catch (e) { got = {}; }
+/* **初回接続は「基準」を取るだけにする。** 保持一覧が空の状態で自動回収に入ると、
+ * Mac に既にある古いログまで全部スマホへ落ちてくる（実機で 7 本・280KB が一斉に
+ * ダウンロードされた）。初回はそのとき基板にあったものを**落とさずに既知として登録**し、
+ * **以後に現れた新しいログだけ**を自動回収する。
+ * 「スマホは自分が記録係だった間のぶんを回収する」という筋。
+ * 個別に欲しければコマンド欄に `get <名前>` と打てば落ちてくる。 */
+let baseDone = false;
+try {
+  got = JSON.parse(localStorage.getItem(LS_GOT) || '{}');
+  baseDone = localStorage.getItem(LS_BASE) === '1';
+} catch (e) { got = {}; }
 
 const CRC_TBL = (() => {
   const t = new Uint32Array(256);
@@ -592,22 +605,41 @@ function dlBin(name, buf) {
 }
 
 /* `ls` の出力を拾う。`  name.bin   12345 バイト` */
+let seen = {};
 function lsLine(line) {
   const m = line.match(/^\s+(\S+\.bin)\s+(\d+) バイト\s*$/);
   if (!m) return false;
   const [, name, size] = m;
-  if (name !== activeLog && !(got[name] && got[name].size === +size)) {
+  seen[name] = +size;
+  if (baseDone && name !== activeLog && !(got[name] && got[name].size === +size)) {
     if (!queue.includes(name)) queue.push(name);
   }
   renderPending();
   return true;
 }
 
+/* 初回接続の締め。`ls` の出力が出揃ったころに呼ぶ。 */
+function sealBaseline() {
+  if (baseDone) return;
+  const n = Object.keys(seen).length;
+  for (const k in seen) got[k] = {size: seen[k], base: true};
+  baseDone = true;
+  try {
+    localStorage.setItem(LS_GOT, JSON.stringify(got));
+    localStorage.setItem(LS_BASE, '1');
+  } catch (e) {}
+  say(`[初回接続: 基板にある ${n} 本を既知として登録した。`
+    + `以後は新しいログだけ自動で取り込む。個別に欲しければ get <名前>]\n`);
+  queue = [];
+  renderPending();
+}
+
 function renderPending() {
   const n = queue.length + (xf ? 1 : 0);
   chip($('cXfer'), n > 0, n === 0 ? '取込'
       : xf ? `取込 ${xf.b64.length * 126 >> 10}K` : `取込 ${n}`);
-  $('pending').textContent = queue.length ? queue.join(' / ') : '（なし）';
+  $('pending').textContent = queue.length ? queue.join(' / ')
+    : baseDone ? '（なし）' : '（初回接続。基準を取るまで取り込まない）';
 }
 
 async function drain() {
@@ -718,7 +750,7 @@ $('bLog').onclick = () => {
 };
 $('bExport').onclick = () => exportPts(pts);
 $('bSnap').onclick = () => send('snap');
-$('bLs').onclick = async () => { queue = []; await send('rec'); await send('ls'); };
+$('bLs').onclick = async () => { queue = []; seen = {}; await send('rec'); await send('ls'); };
 $('cmd').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const v = e.target.value.trim();
