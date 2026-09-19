@@ -623,6 +623,9 @@ static const size_t LOG_RESERVE = 4UL * 1024UL * 1024UL;
  * `usedBytes()` はブロックを走査するので毎回は呼ばない。 */
 static const size_t LOG_LOW = 512UL * 1024UL;
 static const uint32_t ROOM_CHECK_MS = 60000;
+// 台帳は下で定義するが、削除と同期するので前方宣言する
+static int seqOfName(const char *n);
+static void sessDropIfGone(int seq);
 static void makeRoom(const char *keep);
 static uint32_t lastRoomCheck = 0;
 static void logTick() {
@@ -677,7 +680,9 @@ static void makeRoom(const char *keep) {
     char path[72]; snprintf(path, sizeof path, "/%s", oldest);
     size_t sz = 0;
     { File f = LittleFS.open(path, "r"); if (f) sz = f.size(); }
+    int sq = seqOfName(oldest);
     LittleFS.remove(path);
+    sessDropIfGone(sq);
     outf("場所を空けるため消した %s（%u KB）\n", oldest, (unsigned)(sz / 1024));
     if (dp < (int)sizeof deleted - 24)
       dp += snprintf(deleted + dp, sizeof deleted - dp, "%s%s", dp ? "," : "", oldest);
@@ -918,8 +923,88 @@ static void help() {
       "  ota on | off        OTA を有効化して IP を返す（既定は切。再起動で戻る）\n"
       "[その他]\n"
       "  time <unix> 壁時計を合わせる（GPS ログとの突き合わせに要る）\n"
+      "  sess        セッション連番と開始時刻の台帳（auto は名前に日時が入らないため）\n"
       "  ?           この一覧\n"
       "前提の検証状況は SPEC.md §13、実測は ../docs/FINDINGS.md\n");
+}
+
+/* ── セッション時刻の台帳 ────────────────────────────────
+ * **`auto` は起動時に走るので壁時計が未設定で、ファイル名は連番にしかできない。**
+ * どの `auto0003` がいつの走行か、落とす前には分からない。
+ *
+ * そこで**起動後に初めて `time` が入った時点で、そのセッションの開始 epoch を
+ * NVS へ 1 回だけ書く**（`epoch − millis()/1000` で開始時刻が正確に出る）。
+ * 1 起動 1 回なので摩耗も無視できる。
+ *
+ * **ファイル名を後から改名する案は採らない。** 背景転送で `auto0003_01.bin` を
+ * 回収した後に改名すると、受け手には新しいファイルに見えて同じ中身をもう一度
+ * 落とす。台帳なら中身に触らない。
+ *
+ * **削除と同期する。** パート単位で消えるので、**同じセッションのファイルが 1 つも
+ * 残っていないときだけ**台帳から落とす。孤児が残っても害は無い —— 受け手は `ls` と
+ * 突き合わせて実在するぶんだけ日時を出す。 */
+static const int SESS_MAX = 64;
+static uint32_t sessBuf[SESS_MAX * 2];      // seq, epoch の繰り返し
+static int sessN = 0;
+static bool sessLoaded = false, sessWritten = false;
+static int curSeq = -1;                     // この起動のセッション番号。auto 以外は -1
+
+static void sessLoad() {
+  if (sessLoaded) return;
+  prefs.begin("mc52", true);
+  size_t n = prefs.getBytes("sessl", sessBuf, sizeof sessBuf);
+  prefs.end();
+  sessN = n / (2 * sizeof(uint32_t));
+  sessLoaded = true;
+}
+static void sessSave() {
+  prefs.begin("mc52", false);
+  prefs.putBytes("sessl", sessBuf, sessN * 2 * sizeof(uint32_t));
+  prefs.end();
+}
+static void sessPut(uint32_t seq, uint32_t epoch) {
+  sessLoad();
+  for (int i = 0; i < sessN; i++)
+    if (sessBuf[i * 2] == seq) { sessBuf[i * 2 + 1] = epoch; sessSave(); return; }
+  if (sessN >= SESS_MAX) {                  // 古い方から 1 つ押し出す
+    memmove(sessBuf, sessBuf + 2, (SESS_MAX - 1) * 2 * sizeof(uint32_t));
+    sessN = SESS_MAX - 1;
+  }
+  sessBuf[sessN * 2] = seq; sessBuf[sessN * 2 + 1] = epoch; sessN++;
+  sessSave();
+}
+/* 名前が `auto<4桁>_` なら連番を返す。それ以外は -1（手動の名前は日時を含む）。 */
+static int seqOfName(const char *n) {
+  if (strncmp(n, "auto", 4)) return -1;
+  for (int i = 4; i < 8; i++) if (!isdigit((unsigned char)n[i])) return -1;
+  if (n[8] != '_') return -1;
+  return atoi(n + 4);
+}
+static void sessDropIfGone(int seq) {
+  if (seq < 0) return;
+  char pfx[16]; snprintf(pfx, sizeof pfx, "auto%04d_", seq);
+  File root = LittleFS.open("/");
+  for (File f = root.openNextFile(); f; f = root.openNextFile())
+    if (!strncmp(f.name(), pfx, strlen(pfx))) return;   // まだ残っている
+  sessLoad();
+  for (int i = 0; i < sessN; i++) {
+    if ((int)sessBuf[i * 2] != seq) continue;
+    memmove(sessBuf + i * 2, sessBuf + (i + 1) * 2, (sessN - i - 1) * 2 * sizeof(uint32_t));
+    sessN--; sessSave();
+    return;
+  }
+}
+static void cmdSess() {
+  sessLoad();
+  if (!sessN) { out("台帳は空\n"); return; }
+  for (int i = 0; i < sessN; i++) {
+    time_t t = (time_t)sessBuf[i * 2 + 1];
+    struct tm tmv; localtime_r(&t, &tmv);
+    outf("  auto%04lu  %04d-%02d-%02d %02d:%02d:%02d\n",
+         (unsigned long)sessBuf[i * 2], tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+         tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+  }
+  outf("%d セッション\n", sessN);
 }
 
 /* ── 自動開始（実用フェーズ） ──────────────────────────────
@@ -971,6 +1056,7 @@ static void autoStart() {
     if (!propUp) delay(1500);
   }
   prefs.begin("mc52", false); prefs.putInt("aseq", seq); prefs.end();
+  curSeq = seq;                   // 台帳の鍵。`time` が入ったときに使う
   char name[32]; snprintf(name, sizeof name, "auto%04d", seq);
   cmdRec(name);
   char note[96];
@@ -1006,7 +1092,11 @@ static void runCmd(char *line) {
   if (!strcmp(line, "get")) { if (*arg) cmdGet(arg); else out("get <名前>\n"); return; }
   if (!strcmp(line, "rm")) {
     char path[64]; snprintf(path, sizeof path, "%s%s", *arg == '/' ? "" : "/", arg);
-    outf(LittleFS.remove(path) ? "消した %s\n" : "消せない %s\n", path); return;
+    int sq = seqOfName(path + 1);
+    bool ok = LittleFS.remove(path);
+    outf(ok ? "消した %s\n" : "消せない %s\n", path);
+    if (ok) sessDropIfGone(sq);          // 最後のパートなら台帳からも落とす
+    return;
   }
   if (!strcmp(line, "df")) {
     outf("容量 %u KB / 使用 %u KB / 空き %u KB\n",
@@ -1026,8 +1116,17 @@ static void runCmd(char *line) {
   if (!strcmp(line, "time")) {
     time_t t = (time_t)atoll(arg);
     struct timeval tv = {t, 0}; settimeofday(&tv, nullptr);
-    outf("壁時計を %s に合わせた", ctime(&t)); return;
+    outf("壁時計を %s に合わせた", ctime(&t));
+    /* **起動後の最初の 1 回だけ台帳へ書く。** ここで millis() も分かるので、
+     * セッションの開始時刻が正確に出る。 */
+    if (curSeq >= 0 && !sessWritten && t > 1700000000) {
+      sessPut(curSeq, (uint32_t)(t - millis() / 1000));
+      sessWritten = true;
+      outf("台帳に auto%04d の開始時刻を記録した\n", curSeq);
+    }
+    return;
   }
+  if (!strcmp(line, "sess")) { cmdSess(); return; }
   if (!strcmp(line, "x") || !strcmp(line, "X")) {
     uint8_t b[64];
     int n = hexBytes(arg, b, sizeof b - 1);
