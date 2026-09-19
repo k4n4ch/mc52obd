@@ -164,7 +164,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 <div id="bar">
   <button id="bConn">接続</button>
   <button id="bRec" class="rec" disabled>REC</button>
-  <button id="bXfer" disabled>取込</button>
+  <button id="bXfer" disabled>停止・取込</button>
   <button id="bLog">ログ</button>
 </div>
 
@@ -213,7 +213,8 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
       <li><code>auto</code> を使っていないなら<b>「REC」</b>。チップが赤くなり
         <b>Hz が出る</b>のを確認する</li>
       <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない</li>
-      <li><b>停車したら、エンジンを掛けたまま「REC」で停止 →「取込」</b></li>
+      <li><b>停車したら、エンジンを掛けたまま「停止・取込」を押す。</b>
+        記録の停止・測位の書き出し・ログの回収を 1 つでやる</li>
       <li>CRC 一致を確認して<b>キーオフ</b>。<b>転送しきれなければ切ってよい</b> ——
         次回接続時に裏で続ける</li>
       <li>「測位を書き出す」で CSV と GPX が端末に落ちる</li>
@@ -242,7 +243,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 </div>
 
 <script>
-const VERSION = 'v20260919b';
+const VERSION = 'v20260919c';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -675,19 +676,36 @@ function stamp() {
        + '_' + p(d.getHours()) + p(d.getMinutes());
 }
 
+async function stopRec() {
+  if (!recOn) return;
+  say('\n[記録停止]\n');
+  await send('poll off');
+  await new Promise(r => setTimeout(r, 600));
+  await send('rec off');
+  recOn = false;
+  chip($('cRec'), false, 'REC');
+  $('bRec').classList.remove('active');
+}
+
+/* **「停止・取込」は走行の終わりに押す 1 つのボタン。**
+ * 記録を止め、測位を止めて書き出し、**一覧を取り直してから**回収する。
+ *
+ * 一覧を取り直すのが要。接続時の `ls` しか見ていなかったので、**走行中に増えた
+ * ファイルを知らないまま**キューが空で、押しても何も起きなかった（実機で発生）。
+ * 記録を止めるのも要 —— 追記中のファイルは転送対象から外れるので、止めないと
+ * **最後のパートだけ毎回取り残される。** */
+async function finishRide() {
+  $('bXfer').disabled = true;
+  await stopRec();
+  if (pts.length) { stopGps(); chip($('cGps'), false, 'GPS'); exportPts(pts); }
+  queue = []; seen = {};
+  await send('rec');          // 記録中でないことを確認（activeLog を消す）
+  await send('ls');
+  setTimeout(() => { $('bXfer').disabled = false; drain(); }, 1500);
+}
+
 async function toggleRec() {
-  if (recOn) {
-    say('\n[記録停止]\n');
-    await send('poll off');
-    await new Promise(r => setTimeout(r, 600));
-    await send('rec off');
-    recOn = false;
-    chip($('cRec'), false, 'REC');
-    $('bRec').classList.remove('active');
-    stopGps();
-    chip($('cGps'), false, 'GPS');
-    return;
-  }
+  if (recOn) { await stopRec(); stopGps(); chip($('cGps'), false, 'GPS'); return; }
   $('bRec').disabled = true;
   say('\n[記録開始]\n');
   await send('w');                                   // 独自層を起こす
@@ -767,7 +785,7 @@ function exportPts(arr) {
 // ── 配線 ──────────────────────────────────────────────
 $('bConn').onclick = connect;
 $('bRec').onclick = toggleRec;
-$('bXfer').onclick = drain;
+$('bXfer').onclick = finishRide;
 $('bLog').onclick = () => {
   const open = $('drawer').classList.toggle('open');
   $('bLog').classList.toggle('active', open);   // 引き出しが開いている間は点灯
