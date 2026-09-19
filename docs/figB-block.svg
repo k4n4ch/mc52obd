@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 512" width="880" height="512" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>基板のブロック図</title>
+<line x1="150.0" y1="300.0" x2="186.0" y2="300.0" stroke="#eda100" stroke-width="2.6"/>
+<line x1="186.0" y1="300.0" x2="186.0" y2="100.0" stroke="#eda100" stroke-width="2.6"/>
+<line x1="186.0" y1="100.0" x2="200.0" y2="100.0" stroke="#eda100" stroke-width="2.6"/>
+<path d="M200.0,100.0 L193.0,104.0 L193.0,96.0 Z" fill="#eda100"/>
+<line x1="304.0" y1="100.0" x2="420.0" y2="100.0" stroke="#eda100" stroke-width="2.6"/>
+<path d="M420.0,100.0 L413.0,104.0 L413.0,96.0 Z" fill="#eda100"/>
+<text x="356.0" y="90.0" font-size="10.5" fill="#eda100" text-anchor="end" font-weight="600">VIN</text>
+<line x1="362.0" y1="60.0" x2="362.0" y2="100.0" stroke="#eda100" stroke-width="1.6"/>
+<line x1="362.0" y1="100.0" x2="362.0" y2="330.0" stroke="#eda100" stroke-width="1.6"/>
+<line x1="612.0" y1="100.0" x2="660.0" y2="100.0" stroke="#eda100" stroke-width="2.6"/>
+<line x1="660.0" y1="100.0" x2="660.0" y2="205.0" stroke="#1baf7a" stroke-width="2.4"/>
+<line x1="486.0" y1="205.0" x2="712.0" y2="205.0" stroke="#1baf7a" stroke-width="2.4"/>
+<line x1="500.0" y1="205.0" x2="500.0" y2="290.0" stroke="#1baf7a" stroke-width="2.0"/>
+<path d="M500.0,290.0 L496.0,283.0 L504.0,283.0 Z" fill="#1baf7a"/>
+<line x1="700.0" y1="205.0" x2="700.0" y2="262.0" stroke="#1baf7a" stroke-width="2.0"/>
+<path d="M700.0,262.0 L696.0,255.0 L704.0,255.0 Z" fill="#1baf7a"/>
+<text x="490.0" y="197.0" font-size="10.5" fill="#1baf7a" text-anchor="start" font-weight="600">3.3V 1 系統（レベルシフト無し）</text>
+<line x1="150.0" y1="330.0" x2="420.0" y2="330.0" stroke="#2a78d6" stroke-width="2.6"/>
+<path d="M420.0,330.0 L413.0,334.0 L413.0,326.0 Z" fill="#2a78d6"/>
+<text x="230.0" y="322.0" font-size="10.5" fill="#2a78d6" text-anchor="start" font-weight="600">K-Line</text>
+<circle cx="362" cy="330" r="3.6" fill="#eda100"/>
+<line x1="580.0" y1="318.0" x2="650.0" y2="318.0" stroke="#2a78d6" stroke-width="2.0"/>
+<path d="M650.0,318.0 L643.0,322.0 L643.0,314.0 Z" fill="#2a78d6"/>
+<line x1="650.0" y1="350.0" x2="580.0" y2="350.0" stroke="#2a78d6" stroke-width="2.0"/>
+<path d="M580.0,350.0 L587.0,346.0 L587.0,354.0 Z" fill="#2a78d6"/>
+<text x="615.0" y="310.0" font-size="10" fill="#2a78d6" text-anchor="middle" font-weight="normal">TX ← IO17</text>
+<text x="615.0" y="366.0" font-size="10" fill="#2a78d6" text-anchor="middle" font-weight="normal">RX → IO18</text>
+<line x1="700.0" y1="394.0" x2="700.0" y2="412.0" stroke="#2a78d6" stroke-width="1.8"/>
+<line x1="700.0" y1="412.0" x2="505.0" y2="412.0" stroke="#2a78d6" stroke-width="1.8"/>
+<line x1="505.0" y1="412.0" x2="505.0" y2="432.0" stroke="#2a78d6" stroke-width="1.8"/>
+<path d="M505.0,432.0 L501.0,425.0 L509.0,425.0 Z" fill="#2a78d6"/>
+<line x1="790.0" y1="394.0" x2="790.0" y2="432.0" stroke="#2a78d6" stroke-width="1.8"/>
+<path d="M790.0,432.0 L786.0,425.0 L794.0,425.0 Z" fill="#2a78d6"/>
+<rect x="24" y="186" width="126" height="168" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="87.0" y="206.0" font-size="12" fill="#1c1c1c" text-anchor="middle" font-weight="600">車両 4P カプラ</text>
+<text x="87.0" y="221.0" font-size="9.5" fill="#767f89" text-anchor="middle" font-weight="normal">住友 6187-4441</text>
+<text x="36.0" y="246.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">1  GND</text>
+<text x="36.0" y="276.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">2  SCS 未使用</text>
+<text x="36.0" y="306.0" font-size="10.5" fill="#eda100" text-anchor="start" font-weight="600">3  +12V（IG 連動）</text>
+<text x="36.0" y="336.0" font-size="10.5" fill="#2a78d6" text-anchor="start" font-weight="600">4  K-Line</text>
+<rect x="200" y="78" width="104" height="44" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="252.0" y="103.0" font-size="11" fill="#1c1c1c" text-anchor="middle" font-weight="600">D1  SS36</text>
+<text x="252.0" y="117.0" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">逆接保護</text>
+<rect x="296" y="18" width="136" height="42" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="364.0" y="42.5" font-size="10.5" fill="#1c1c1c" text-anchor="middle" font-weight="600">D2 SMBJ18A（TVS）</text>
+<text x="364.0" y="56.0" font-size="9.5" fill="#767f89" text-anchor="middle" font-weight="normal">C1 C2 平滑・バルク</text>
+<rect x="420" y="72" width="192" height="56" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="516.0" y="97.0" font-size="11" fill="#1c1c1c" text-anchor="middle" font-weight="600">U1  AP63203WU-7 ＋ L1</text>
+<text x="516.0" y="111.0" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">12V → 3.3V 同期整流</text>
+<rect x="322" y="222" width="80" height="32" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="362.0" y="246.5" font-size="10.5" fill="#1c1c1c" text-anchor="middle" font-weight="600">R7 510Ω</text>
+<rect x="420" y="290" width="160" height="88" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="500.0" y="315.5" font-size="11.5" fill="#1c1c1c" text-anchor="middle" font-weight="600">U3  L9637D</text>
+<text x="500.0" y="329.5" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">K-Line トランシーバ</text>
+<text x="500.0" y="343.5" font-size="10" fill="#eda100" text-anchor="middle" font-weight="normal">VS = 12V（バス側）</text>
+<text x="500.0" y="357.5" font-size="10" fill="#1baf7a" text-anchor="middle" font-weight="normal">VCC = 3.3V（ロジック）</text>
+<rect x="650" y="262" width="196" height="132" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="748.0" y="287.5" font-size="11.5" fill="#1c1c1c" text-anchor="middle" font-weight="600">U2  ESP32-S3-WROOM-1</text>
+<text x="748.0" y="301.5" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">N16R8</text>
+<text x="748.0" y="315.5" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">BLE  ——  スマホと転送</text>
+<text x="748.0" y="329.5" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">WiFi  ——  OTA</text>
+<text x="748.0" y="343.5" font-size="10" fill="#767f89" text-anchor="middle" font-weight="normal">16MB  ——  LittleFS に記録</text>
+<rect x="420" y="432" width="170" height="50" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="505.0" y="456.5" font-size="10.5" fill="#1c1c1c" text-anchor="middle" font-weight="600">J3  書き込み 5P</text>
+<text x="505.0" y="470.0" font-size="9.5" fill="#767f89" text-anchor="middle" font-weight="normal">圧入のみ・部品を載せない</text>
+<rect x="650" y="432" width="196" height="50" rx="5" fill="#f2f4f6" stroke="#b8c0c8" stroke-width="1.4"/>
+<text x="748.0" y="456.5" font-size="10.5" fill="#1c1c1c" text-anchor="middle" font-weight="600">J2  表示器 6P（未決）</text>
+<text x="748.0" y="470.0" font-size="9.5" fill="#767f89" text-anchor="middle" font-weight="normal">I2C / SPI どちらでも挿せる</text>
+<text x="24.0" y="404.0" font-size="10.5" fill="#1c1c1c" text-anchor="start" font-weight="600">50 × 40mm / 2 層 / 27 部品 19 品種 / 部品代 $8.32</text>
+<text x="24.0" y="420.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">JLCPCB で実装まで。手ハンダは J1 J2 だけ</text>
+<text x="24.0" y="452.0" font-size="10" fill="#767f89" text-anchor="start" font-weight="normal">R7 が基板に載っているので、K を未接続のまま 12V を入れると</text>
+<text x="24.0" y="467.0" font-size="10" fill="#767f89" text-anchor="start" font-weight="normal">K は 12V に吊られ、TX → K → RX が基板の中で閉じる。</text>
+<text x="24.0" y="482.0" font-size="10" fill="#c2410c" text-anchor="start" font-weight="600">車両に挿さずに通信を確かめられる。</text>
+<line x1="24.0" y1="24.0" x2="44.0" y2="24.0" stroke="#eda100" stroke-width="3"/>
+<text x="49.0" y="28.0" font-size="10" fill="#eda100" text-anchor="start" font-weight="600">12V</text>
+<line x1="24.0" y1="41.0" x2="44.0" y2="41.0" stroke="#1baf7a" stroke-width="3"/>
+<text x="49.0" y="45.0" font-size="10" fill="#1baf7a" text-anchor="start" font-weight="600">3.3V</text>
+<line x1="24.0" y1="58.0" x2="44.0" y2="58.0" stroke="#2a78d6" stroke-width="3"/>
+<text x="49.0" y="62.0" font-size="10" fill="#2a78d6" text-anchor="start" font-weight="600">K-Line・信号</text>
+</svg>

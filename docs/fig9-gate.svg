@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 340" width="820" height="340" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>駆動状態ゲートの効果</title>
+<text x="200.0" y="30.0" font-size="13" fill="#767f89" text-anchor="start" font-weight="600">駆動中に段が付いた割合</text>
+<text x="600.0" y="30.0" font-size="13" fill="#767f89" text-anchor="end" font-weight="600">非伝達なのに答えた</text>
+<text x="186.0" y="84.0" font-size="12" fill="#767f89" text-anchor="end" font-weight="600">1 本目 09-19 11:50</text>
+<text x="186.0" y="100.0" font-size="10.5" fill="#767f89" text-anchor="end" font-weight="normal">n = 2651</text>
+<rect x="200" y="58" width="330" height="16" fill="#808a94" opacity="0.13" rx="2"/>
+<rect x="200" y="58" width="300.8" height="16" fill="#9aa4ae" rx="2"/>
+<text x="493.8" y="70.5" font-size="11.5" fill="#ffffff" text-anchor="end" font-weight="600">91.1%</text>
+<text x="207.0" y="70.5" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="normal">ELM327 経路</text>
+<rect x="200" y="80" width="330" height="16" fill="#808a94" opacity="0.13" rx="2"/>
+<rect x="200" y="80" width="328.2" height="16" fill="#1baf7a" rx="2"/>
+<text x="521.2" y="92.5" font-size="11.5" fill="#ffffff" text-anchor="end" font-weight="600">99.5%</text>
+<text x="207.0" y="92.5" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="normal">駆動状態ゲート</text>
+<text x="596.0" y="71.0" font-size="15" fill="#c2410c" text-anchor="end" font-weight="700">74</text>
+<text x="600.0" y="71.0" font-size="11" fill="#c2410c" text-anchor="start" font-weight="normal">件</text>
+<text x="596.0" y="93.0" font-size="15" fill="#1baf7a" text-anchor="end" font-weight="700">0</text>
+<text x="600.0" y="93.0" font-size="11" fill="#1baf7a" text-anchor="start" font-weight="normal">件</text>
+<text x="186.0" y="158.0" font-size="12" fill="#767f89" text-anchor="end" font-weight="600">2 本目 09-19 12:24</text>
+<text x="186.0" y="174.0" font-size="10.5" fill="#767f89" text-anchor="end" font-weight="normal">n = 1186</text>
+<rect x="200" y="132" width="330" height="16" fill="#808a94" opacity="0.13" rx="2"/>
+<rect x="200" y="132" width="287.6" height="16" fill="#9aa4ae" rx="2"/>
+<text x="480.6" y="144.5" font-size="11.5" fill="#ffffff" text-anchor="end" font-weight="600">87.1%</text>
+<text x="207.0" y="144.5" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="normal">ELM327 経路</text>
+<rect x="200" y="154" width="330" height="16" fill="#808a94" opacity="0.13" rx="2"/>
+<rect x="200" y="154" width="327.3" height="16" fill="#1baf7a" rx="2"/>
+<text x="520.3" y="166.5" font-size="11.5" fill="#ffffff" text-anchor="end" font-weight="600">99.2%</text>
+<text x="207.0" y="166.5" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="normal">駆動状態ゲート</text>
+<text x="596.0" y="145.0" font-size="15" fill="#c2410c" text-anchor="end" font-weight="700">59</text>
+<text x="600.0" y="145.0" font-size="11" fill="#c2410c" text-anchor="start" font-weight="normal">件</text>
+<text x="596.0" y="167.0" font-size="15" fill="#1baf7a" text-anchor="end" font-weight="700">0</text>
+<text x="600.0" y="167.0" font-size="11" fill="#1baf7a" text-anchor="start" font-weight="normal">件</text>
+<text x="186.0" y="232.0" font-size="12" fill="#767f89" text-anchor="end" font-weight="600">3 本目 09-19 15:17</text>
+<text x="186.0" y="248.0" font-size="10.5" fill="#767f89" text-anchor="end" font-weight="normal">n = 5493</text>
+<rect x="200" y="206" width="330" height="16" fill="#808a94" opacity="0.13" rx="2"/>
+<rect x="200" y="206" width="317.8" height="16" fill="#9aa4ae" rx="2"/>
+<text x="510.8" y="218.5" font-size="11.5" fill="#ffffff" text-anchor="end" font-weight="600">96.3%</text>
+<text x="207.0" y="218.5" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="normal">ELM327 経路</text>
+<rect x="200" y="228" width="330" height="16" fill="#808a94" opacity="0.13" rx="2"/>
+<rect x="200" y="228" width="329.2" height="16" fill="#1baf7a" rx="2"/>
+<text x="522.2" y="240.5" font-size="11.5" fill="#ffffff" text-anchor="end" font-weight="600">99.8%</text>
+<text x="207.0" y="240.5" font-size="10.5" fill="#ffffff" text-anchor="start" font-weight="normal">駆動状態ゲート</text>
+<text x="596.0" y="219.0" font-size="15" fill="#c2410c" text-anchor="end" font-weight="700">125</text>
+<text x="600.0" y="219.0" font-size="11" fill="#c2410c" text-anchor="start" font-weight="normal">件</text>
+<text x="596.0" y="241.0" font-size="15" fill="#1baf7a" text-anchor="end" font-weight="700">0</text>
+<text x="600.0" y="241.0" font-size="11" fill="#1baf7a" text-anchor="start" font-weight="normal">件</text>
+<text x="200.0" y="282.0" font-size="11.5" fill="#767f89" text-anchor="start" font-weight="normal">棄却していた変速過渡は、駆動中と分かっていれば最近傍で決まる。</text>
+<text x="200.0" y="299.0" font-size="11.5" fill="#767f89" text-anchor="start" font-weight="normal">誤答を弾く役は index 4 が担うので、窓は「どの段か」だけを決めればよい。</text>
+</svg>

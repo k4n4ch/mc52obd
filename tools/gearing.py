@@ -29,6 +29,10 @@ RHO  = 1.20      # kg/m^3
 CDA  = 0.60      # m^2（直立ネイキッド＋乗員）
 
 LUG_RPM  = 3900  # トップギアで粘れる下限とみなす回転数
+
+# **公開する図に載せる車速の上限。** 高速道路の最高法定速度を超える点は出さない。
+# 実測ログには (0D+0.5)×15/14 で 130.2km/h に相当する点が 23 ある（2026-09-05）。
+SPD_MAX_PUB = 120.0
 REV_LIMIT = 10500
 
 
@@ -554,10 +558,14 @@ def fig_usage(path, logdir='private/logs'):
 
     ログは個人の移動履歴なのでリポジトリに含めない。無ければ図も作らない。
     """
+    # **GEARING.md の表と同じ母集団に固定する。** 全ログを拾うと図（8 本 27,083 点）と
+    # すぐ下の表（3 本 13,153 行）が別のものを指す。2026-08-30 の 3 走行に絞る
+    # （同日の 22 行 / 54 行は走行前の短い確認なので行数で落とす）。
     import csv, glob, os
-    files = sorted(glob.glob(os.path.join(logdir, 'mc52_*.csv')))
+    files = [f for f in sorted(glob.glob(os.path.join(logdir, 'mc52_2026-08-30_*.csv')))
+             if sum(1 for _ in open(f)) > 100]
     if not files:
-        print(f'  （{logdir}/mc52_*.csv が無いので使用密度図は作らない）')
+        print(f'  （{logdir}/mc52_2026-08-30_*.csv が無いので使用密度図は作らない）')
         return False
 
     K, GF = 1.0057, 15 / 14
@@ -572,6 +580,7 @@ def fig_usage(path, logdir='private/logs'):
         return best if bd <= 0.04 + 0.5 / s else None
 
     pts = {n: [] for n in GEAR}
+    used, n_cut = set(), 0
     for f in files:
         for r in csv.DictReader(open(f)):
             try:
@@ -579,17 +588,26 @@ def fig_usage(path, logdir='private/logs'):
             except (ValueError, KeyError, TypeError):
                 continue
             g = gear_of(rpm, spd)
-            if g: pts[g].append(((spd + 0.5) * GF, rpm))
+            if not g:
+                continue
+            v = (spd + 0.5) * GF
+            if v > SPD_MAX_PUB:      # 公開しない速度域
+                n_cut += 1
+                continue
+            pts[g].append((v, rpm))
+            used.add(f)
     n_all = sum(len(v) for v in pts.values())
+    if n_cut:
+        print(f'  （{SPD_MAX_PUB:.0f}km/h 超の {n_cut} 点は図に載せない）')
 
     W, H = 760, 500
     L, R_, T, B = 62, 116, 30, 74
-    x0, x1, y0, y1 = 0, 125, 2600, 10800
+    x0, x1, y0, y1 = 0, SPD_MAX_PUB, 2600, 10800
     fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - R_)
     fy = lambda r: H - B - (r - y0) / (y1 - y0) * (H - T - B)
     s = [_hdr(W, H, '実走行の使用点')]
 
-    for v in range(0, 126, 20):
+    for v in range(0, int(SPD_MAX_PUB) + 1, 20):
         s.append(f'<line x1="{fx(v):.1f}" y1="{T}" x2="{fx(v):.1f}" y2="{H-B}" '
                  f'stroke="{C_GR}" stroke-width="1" opacity="0.18"/>')
         s.append(_txt(fx(v), H - B + 18, f'{v}', 11.5, anchor='middle'))
@@ -626,7 +644,8 @@ def fig_usage(path, logdir='private/logs'):
         y = T + 12 + i * 17
         s.append(f'<rect x="{L+14}" y="{y-9}" width="14" height="11" fill="{GC[n]}"/>')
         s.append(_txt(L + 34, y, f'{n}速', 11.5, GC[n], weight='600'))
-    s.append(_txt(L + 76, T + 12, f'実走 3 本 {n_all:,} 点（ギヤ確定分のみ）', 11))
+    s.append(_txt(L + 76, T + 12,
+                  f'実走 {len(used)} 本 {n_all:,} 点（ギヤ確定分のみ）', 11))
     s.append(_txt(L + 76, T + 29, '1 点 = 1 サンプル。濃い所ほど滞在時間が長い', 11))
     s.append(_txt(L + 76, T + 46, '細線＝15T の理論線', 11))
     s.append('</svg>')
