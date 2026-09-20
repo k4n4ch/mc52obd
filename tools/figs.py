@@ -302,6 +302,7 @@ def fig_tol(path, rows):
     L, Rm, T, B = 60, 172, 28, 54
     x0, x1, y1 = 8, 60, 12.0
     fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - Rm)
+    HL = W - Rm + 26
     fy = lambda v: H - B - v / y1 * (H - T - B)
     s = [_hdr(W, H, '許容の内訳と誤答')]
 
@@ -775,39 +776,44 @@ def load_elm(logdir):
 
 
 def fig_charging(path, logdir):
-    """充電電圧は回転数に依らない。**健全なら相関が無いことが合格条件。**"""
+    """充電電圧は回転数に依らない。**健全なら相関が無いことが合格条件。**
+
+    右に電圧の分布を同じ軸で並べる。帯（5–95%）だけでは中身の形が見えず、
+    旧バッテリーの二峰性が隠れてしまうため。"""
     old, new, _, _ = load_elm(logdir)
     if len(old) < 500 or len(new) < 500:
         print(f'  （{path}: ELM327 のログが足りないので作らない）')
         return
     BINS = [(1300, 1600)] + [(r, r + 500) for r in range(1600, 6500, 500)]
 
-    W, H = 820, 460
-    L, Rm, T, B = 60, 196, 74, 56
-    y0, y1 = 13.0, 16.5
-    x0, x1 = 1300, 6500
-    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - Rm)
+    W, H = 880, 560
+    T, B = 78, 168                      # B は下の注記ぶんを含む
+    L, PR = 60, 600                     # 左パネル（rpm×電圧）
+    HL, HW = 646, 172                   # 右パネル（分布）
+    y0, y1, x0, x1 = 13.0, 16.5, 1300, 6500
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (PR - L)
     fy = lambda v: H - B - (v - y0) / (y1 - y0) * (H - T - B)
     s = [_hdr(W, H, '充電電圧と回転数')]
+
+    s.append(_txt(L, T - 44, '充電電圧は回転数に依らない。違いは分布の形に出る', 14.5,
+                  '#1c1c1c', weight='600'))
+    s.append(_txt(L, T - 25, 'ELM327・同じ機材でバッテリー交換の前後を比べた'
+                  '（旧 5 本 n=15,162 / 新 5 本 n=19,406）。電圧は 0.1V 刻み', 11))
 
     for r in range(2000, x1 + 1, 1000):
         s.append(_line(fx(r), T, fx(r), H - B, C_GR, 1, op=0.18))
         s.append(_txt(fx(r), H - B + 17, f'{r:,}', 11, anchor='middle'))
     for v in (13, 14, 15, 16):
-        s.append(_line(L, fy(v), W - Rm, fy(v), C_GR, 1, op=0.18))
+        s.append(_line(L, fy(v), PR, fy(v), C_GR, 1, op=0.18))
         s.append(_txt(L - 8, fy(v) + 4, f'{v}', 11.5, anchor='end'))
-    s.append(_txt((L + W - Rm) / 2, H - 14, 'エンジン回転数 [rpm]', 12.5, anchor='middle'))
-    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12.5" fill="{C_TX}" '
+    s.append(_txt((L + PR) / 2, H - B + 34, 'エンジン回転数 [rpm]', 12, anchor='middle'))
+    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12" fill="{C_TX}" '
              f'text-anchor="middle" transform="rotate(-90 15 {(T+H-B)/2:.0f})">'
              f'制御モジュール電圧 [V]</text>')
+    s.append(_line(L, fy(15.0), PR, fy(15.0), '#1c1c1c', 1.5, dash='6 4'))
+    s.append(_txt(PR - 4, fy(15.0) - 7, '15.0V', 11, '#1c1c1c', anchor='end', weight='600'))
 
-    s.append(_txt(L, T - 40, '充電電圧は回転数に依らない', 14, '#1c1c1c', weight='600'))
-    s.append(_txt(L, T - 22,
-                  'ELM327・同じ機材でバッテリー交換の前後を比べた（旧 5 本 / 新 5 本）', 11))
-    s.append(_line(L, fy(15.0), W - Rm, fy(15.0), '#1c1c1c', 1.6, dash='6 4'))
-    s.append(_txt(W - Rm - 4, fy(15.0) - 7, '15.0V', 11, '#1c1c1c', anchor='end', weight='600'))
-
-    for pts, col, lab in ((old, C_NG, '旧バッテリー'), (new, '#1baf7a', '新バッテリー')):
+    for pts, col in ((old, C_NG), (new, '#1baf7a')):
         up, dn, med = [], [], []
         for lo, hi in BINS:
             v = sorted(x[1] for x in pts if lo <= x[0] < hi)
@@ -825,29 +831,58 @@ def fig_charging(path, logdir):
         s.append(_path(med, col, 2.6))
         for cx, cy in med:
             s.append(_dot(cx, cy, 3.0, col, 0.95))
+    s.append(_txt(L + 6, T + 14, '帯＝5–95%、線＝中央値', 10.5))
 
+    # ── 右パネル: 電圧の分布（軸を共有）──
+    hist = {}
+    for lab, g in (('old', old), ('new', new)):
+        h = collections.Counter(round(v, 1) for _, v in g)
+        hist[lab] = {k: 100 * n / len(g) for k, n in h.items()}
+    hmax = max(max(hist['old'].values()), max(hist['new'].values()))
+    fh = lambda pct: HW * pct / hmax
+    s.append(_txt(HL, T - 6, '観測された分布', 11, weight='600'))
+    for pct in (0, 10, 20):
+        s.append(_line(HL + fh(pct), T, HL + fh(pct), H - B, C_GR, 1, op=0.15))
+        s.append(_txt(HL + fh(pct), H - B + 17, f'{pct}', 10.5, anchor='middle'))
+    s.append(_txt(HL + HW / 2, H - B + 34, '割合 [%]', 11, anchor='middle'))
+    rowh = (H - T - B) / ((y1 - y0) / 0.1)
+    for lab, col, off in (('old', C_NG, -rowh * 0.48), ('new', '#1baf7a', rowh * 0.04)):
+        for v, pct in sorted(hist[lab].items()):
+            if y0 <= v <= y1:
+                s.append(f'<rect x="{HL:.1f}" y="{fy(v) + off:.1f}" width="{fh(pct):.2f}" '
+                         f'height="{rowh * 0.44:.2f}" fill="{col}" opacity="0.85"/>')
+    s.append(_line(HL, fy(15.0), HL + HW, fy(15.0), '#1c1c1c', 1.4, dash='6 4'))
+    s.append(_line(HL + 40, fy(14.55), HL + 40, fy(15.6), C_NG, 1.2))
+    s.append(_line(HL + 36, fy(14.55), HL + 44, fy(14.55), C_NG, 1.2))
+    s.append(_line(HL + 36, fy(15.6), HL + 44, fy(15.6), C_NG, 1.2))
+    s.append(_txt(HL + 50, fy(15.25), '第二の山', 11.5, C_NG, weight='600'))
+    s.append(_txt(HL + 50, fy(15.05), '約 19%', 11, C_NG))
+
+    # ── 凡例と注記（下に全幅で置く）──
     over = lambda g: 100 * sum(1 for x in g if x[1] > 15.0) / len(g)
-    tx = W - Rm + 14
-    y = T + 12
-    s.append(_txt(tx, y, '帯は 5–95%、線は中央値', 11)); y += 26
-    for col, lab, g in ((C_NG, '旧バッテリー', old), ('#1baf7a', '新バッテリー', new)):
-        s.append(_line(tx, y - 4, tx + 20, y - 4, col, 3))
-        s.append(_txt(tx + 26, y, lab, 11.5, col, weight='600')); y += 16
-        s.append(_txt(tx + 8, y, f'n = {len(g):,}', 10.5)); y += 16
-        s.append(_txt(tx + 8, y, f'15V 超  {over(g):.2f}%', 12, col, weight='700')); y += 24
-    for ln, w in (('回転を上げても上がらない。', 'normal'),
-                  ('アイドルから既にレギュ', 'normal'),
-                  ('レータがクランプしている', 'normal'),
-                  ('＝発電は足りている。', '600'), ('', 'normal'),
-                  ('違いは中央値ではなく', 'normal'),
-                  ('散らばりに出た。15V 超は', 'normal'),
-                  ('弱ったバッテリーが充電', 'normal'),
-                  ('電流を飲めない症状で、', 'normal'),
-                  ('発電系の症状ではない。', '600')):
-        if ln:
-            s.append(_txt(tx, y, ln, 10.5, weight=w))
-        y += 14
+    ly = H - B + 62
+    for i, (col, lab, g) in enumerate(((C_NG, '旧バッテリー', old),
+                                       ('#1baf7a', '新バッテリー', new))):
+        x = L + i * 200
+        s.append(_line(x, ly - 4, x + 20, ly - 4, col, 3.2))
+        s.append(_txt(x + 27, ly, lab, 12, col, weight='600'))
+        s.append(_txt(x + 27, ly + 17, f'15V 超 {over(g):.2f}％  σ {_sd(g):.2f}V', 11, col))
+    for i, (ln, w) in enumerate((
+            ('**回転を上げても電圧は上がらない。** アイドルの時点でレギュレータが'
+             'クランプしており、発電は 1,400rpm で既に足りている。', 'normal'),
+            ('**違いは中央値ではなく分布の形。** 旧は 13.7V の主峰の上に 14.6〜15.5V の'
+             '第二の山を持つ（約 19%）——ばらついたのではなく別の状態に入っていた。', 'normal'),
+            ('弱ったバッテリーは内部抵抗が上がって充電電流を飲めないため、'
+             'レギュレータの出力が上へ振れる。**発電系ではなくバッテリー側の症状。**',
+             'normal'))):
+        s.append(_txt(L, ly + 44 + i * 17, ln.replace('**', ''), 11))
     _save(path, s)
+
+
+def _sd(g):
+    import statistics
+    return statistics.pstdev([v for _, v in g])
+
 
 
 def main():
