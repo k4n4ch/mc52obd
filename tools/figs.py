@@ -123,6 +123,7 @@ def load_run(paths, with_base=False):
         rows.append(dict(t=ms / 1000,
                          rpm=float((p[4] << 8) | p[5]), spd=float(p[17]),
                          tps=p[6] * 100 / 255, inj=float((p[18] << 8) | p[19]),
+                         volt=p[16] / 10, ect=p[9] - 40,
                          drive=drive, i8=i8))
     return (rows, base) if with_base else rows
 
@@ -672,6 +673,83 @@ def fig_block(path):
     _save(path, s)
 
 
+
+# ── figD クランキング ─────────────────────────────────────
+def fig_crank(path, rows, pre=2.5, post=8.0):
+    """始動時の電圧と回転数。**基板は電圧を rpm と同じフレームで返す**ので、
+    5Hz の全サンプルが新鮮な値になる（ELM327 の `42` は遅い層で保持値が並ぶ）。"""
+    fire = None
+    for a, b in zip(rows, rows[1:]):
+        if a['rpm'] < 100 and b['rpm'] > 500:
+            fire = b['t']
+            break
+    if fire is None:
+        print(f'  （{path}: 始動の瞬間が見つからないので作らない）')
+        return
+    seg = [r for r in rows if fire - pre <= r['t'] <= fire + post]
+    t0 = seg[0]['t']
+
+    W, H = 790, 420
+    L, Rm, T, B = 62, 62, 56, 56
+    v0, v1, r1 = 8.0, 15.0, 3000.0
+    span = seg[-1]['t'] - t0
+    fx = lambda t: L + (t - t0) / span * (W - L - Rm)
+    fv = lambda v: H - B - (v - v0) / (v1 - v0) * (H - T - B)
+    fr = lambda r: H - B - r / r1 * (H - T - B)
+    s = [_hdr(W, H, 'クランキング時の電圧と回転数')]
+
+    for k in range(0, int(span) + 1, 2):
+        s.append(_line(fx(t0 + k), T, fx(t0 + k), H - B, C_GR, 1, op=0.18))
+        s.append(_txt(fx(t0 + k), H - B + 17, f'{k}', 11, anchor='middle'))
+    for v in range(int(v0), int(v1) + 1, 1):
+        s.append(_line(L, fv(v), W - Rm, fv(v), C_GR, 1, op=0.12))
+        if v % 2 == 0:
+            s.append(_txt(L - 8, fv(v) + 4, f'{v}', 11, '#c2410c', anchor='end'))
+    for r in range(0, int(r1) + 1, 1000):
+        s.append(_txt(W - Rm + 8, fr(r) + 4, f'{r:,}', 11, '#5b6670'))
+
+    # クランキングの帯（rpm がまだ立っていない最後の沈み込み）
+    dip = min((r for r in seg if r['t'] <= fire), key=lambda r: r['volt'])
+    s.append(f'<rect x="{fx(dip["t"]) - 6:.1f}" y="{T}" width="{fx(fire) - fx(dip["t"]) + 6:.1f}" '
+             f'height="{H - T - B}" fill="{C_NG}" opacity="0.08"/>')
+
+    s.append(_path([(fx(r['t']), fr(min(r['rpm'], r1))) for r in seg], '#5b6670', 1.6))
+    s.append(_path([(fx(r['t']), fv(max(min(r['volt'], v1), v0))) for r in seg], '#c2410c', 2.4))
+    for r in seg:
+        s.append(_dot(fx(r['t']), fv(max(min(r['volt'], v1), v0)), 2.0, '#c2410c', 0.9))
+
+    s.append(_txt(L, T - 34, '始動時の電圧と回転数', 14, '#1c1c1c', weight='600'))
+    s.append(_txt(L, T - 16,
+                  f'自作基板・5Hz。電圧は回転数と同じフレームなので全サンプルが新鮮。'
+                  f'水温 {seg[0]["ect"]:.0f}℃ の再始動', 11))
+    s.append(_txt((L + W - Rm) / 2, H - 14, '経過 [秒]', 12, anchor='middle'))
+    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12" fill="#c2410c" '
+             f'text-anchor="middle" transform="rotate(-90 15 {(T+H-B)/2:.0f})">電圧 [V]</text>')
+    s.append(f'<text x="{W-14}" y="{(T+H-B)/2:.0f}" font-size="12" fill="#5b6670" '
+             f'text-anchor="middle" transform="rotate(90 {W-14} {(T+H-B)/2:.0f})">回転数 [rpm]</text>')
+
+    idle = seg[0]['volt']
+    s.append(_txt(fx(t0 + 0.2), fv(idle) - 10, f'IG ON・エンジン停止 {idle:.1f}V', 11, '#c2410c'))
+    s.append(_txt(fx(dip['t']) - 8, fv(dip['volt']) + 4, f'{dip["volt"]:.1f}V', 12, C_NG,
+                  anchor='end', weight='700'))
+    s.append(_txt(fx(dip['t']) - 8, fv(dip['volt']) + 19, 'クランキング', 10.5, C_NG, anchor='end'))
+    s.append(_line(fx(fire), T, fx(fire), H - B, '#1c1c1c', 1, dash='3 3'))
+    s.append(_txt(fx(fire) + 6, T + 14, '初爆', 11.5, '#1c1c1c', weight='600'))
+    rec = next((r for r in seg if r['t'] > fire and r['volt'] >= 13.0), None)
+    if rec:
+        s.append(_line(fx(rec['t']), T, fx(rec['t']), H - B, '#1baf7a', 1, dash='3 3'))
+        s.append(_txt(fx(rec['t']) + 6, H - B - 12,
+                      f'発電で 13V 復帰（初爆から {rec["t"] - fire:.1f} 秒）', 11.5, '#1baf7a',
+                      weight='600'))
+    mx = max(seg, key=lambda r: r['rpm'])
+    s.append(_txt(fx(mx['t']) + 10, fr(mx['rpm']) + 17, f'吹き上がり {mx["rpm"]:.0f} rpm', 11,
+                  '#5b6670'))
+    last = seg[-1]
+    s.append(_txt(fx(last['t']) - 4, fr(last['rpm']) + 16, f'アイドルへ {last["rpm"]:.0f} rpm',
+                  11, '#5b6670', anchor='end'))
+    _save(path, s)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--logs', default='private/logs')
@@ -693,6 +771,8 @@ def main():
     fig_band(f'{a.out}/fig7-band.svg', two)
     fig_tol(f'{a.out}/fig8-tolerance.svg', [r for _, rs in runs for r in rs])
     fig_gate(f'{a.out}/fig9-gate.svg', runs)
+
+    fig_crank(f'{a.out}/figD-cranking.svg', runs[2][1])
 
     probe = f'{lg}/probe.bin'
     if os.path.exists(probe):
