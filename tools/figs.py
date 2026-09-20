@@ -53,7 +53,10 @@ FONT = "-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif"
 def _hdr(w, h, title):
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
             f'width="{w}" height="{h}" font-family="{FONT}" role="img">'
-            f'<title>{title}</title>')
+            f'<title>{title}</title>'
+            # **地を必ず塗る。** GitHub のダークテーマは透明 SVG の背後を黒にするので、
+            # 塗らないと黒・濃灰の文字と点が消える。PDF や外部への貼り付けでも同じ。
+            f'<rect x="0" y="0" width="{w}" height="{h}" fill="#ffffff"/>')
 
 
 def _txt(x, y, s, size=12, fill=None, anchor='start', weight='normal', op=None):

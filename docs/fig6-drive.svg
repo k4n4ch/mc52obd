@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 790 430" width="790" height="430" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>駆動状態で分けた比の散布</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 790 430" width="790" height="430" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>駆動状態で分けた比の散布</title><rect x="0" y="0" width="790" height="430" fill="#ffffff"/>
 <rect x="46.0" y="30" width="350.0" height="344" fill="none" stroke="#9aa4ae" stroke-width="1" opacity="0.4"/>
 <line x1="46.0" y1="30.0" x2="46.0" y2="374.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
 <text x="46.0" y="391.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">0</text>
