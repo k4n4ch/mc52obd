@@ -26,7 +26,8 @@ Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるか
 駆動フラグによる判定則の評価まで。まず読むならここ。
 
 実測結果の全量は [FINDINGS.md](docs/FINDINGS.md)、フロントスプロケット 14T / 15T の
-走行余力比較は [GEARING.md](docs/GEARING.md)。
+走行余力比較は [GEARING.md](docs/GEARING.md)。**次にどの走行で何が埋まるかは
+[probe-plan.md](docs/probe-plan.md)。**
 
 各アプリの設計と実装は [docs/monitor.md](docs/monitor.md) / [docs/viewer.md](docs/viewer.md)、
 両者に共通するギヤ判定と車速補正は [docs/gear.md](docs/gear.md)。
