@@ -750,6 +750,106 @@ def fig_crank(path, rows, pre=2.5, post=8.0):
     _save(path, s)
 
 
+
+# ── figE 充電電圧 ─────────────────────────────────────────
+BATT_SWAP = '2026-09-05'       # この日に TTZ8V へ交換した
+
+
+def load_elm(logdir):
+    """ELM327 のログを、バッテリー交換の前後で分けて返す。"""
+    old, new = [], []
+    for f in sorted(glob.glob(f'{logdir}/mc52_*.csv')) + sorted(glob.glob(f'{logdir}/cb250r_*.csv')):
+        tgt = new if BATT_SWAP in f else old
+        n = 0
+        for r in csv.DictReader(open(f, encoding='utf-8')):
+            try:
+                rpm, v = float(r['rpm']), float(r['volt'])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if rpm > 500:
+                tgt.append((rpm, v)); n += 1
+        if n >= 100:
+            tgt.append(None)              # ログの区切り
+    return [x for x in old if x], [x for x in new if x], \
+           sum(1 for x in old if x is None), sum(1 for x in new if x is None)
+
+
+def fig_charging(path, logdir):
+    """充電電圧は回転数に依らない。**健全なら相関が無いことが合格条件。**"""
+    old, new, _, _ = load_elm(logdir)
+    if len(old) < 500 or len(new) < 500:
+        print(f'  （{path}: ELM327 のログが足りないので作らない）')
+        return
+    BINS = [(1300, 1600)] + [(r, r + 500) for r in range(1600, 6500, 500)]
+
+    W, H = 820, 460
+    L, Rm, T, B = 60, 196, 74, 56
+    y0, y1 = 13.0, 16.5
+    x0, x1 = 1300, 6500
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - Rm)
+    fy = lambda v: H - B - (v - y0) / (y1 - y0) * (H - T - B)
+    s = [_hdr(W, H, '充電電圧と回転数')]
+
+    for r in range(2000, x1 + 1, 1000):
+        s.append(_line(fx(r), T, fx(r), H - B, C_GR, 1, op=0.18))
+        s.append(_txt(fx(r), H - B + 17, f'{r:,}', 11, anchor='middle'))
+    for v in (13, 14, 15, 16):
+        s.append(_line(L, fy(v), W - Rm, fy(v), C_GR, 1, op=0.18))
+        s.append(_txt(L - 8, fy(v) + 4, f'{v}', 11.5, anchor='end'))
+    s.append(_txt((L + W - Rm) / 2, H - 14, 'エンジン回転数 [rpm]', 12.5, anchor='middle'))
+    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12.5" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 15 {(T+H-B)/2:.0f})">'
+             f'制御モジュール電圧 [V]</text>')
+
+    s.append(_txt(L, T - 40, '充電電圧は回転数に依らない', 14, '#1c1c1c', weight='600'))
+    s.append(_txt(L, T - 22,
+                  'ELM327・同じ機材でバッテリー交換の前後を比べた（旧 5 本 / 新 5 本）', 11))
+    s.append(_line(L, fy(15.0), W - Rm, fy(15.0), '#1c1c1c', 1.6, dash='6 4'))
+    s.append(_txt(W - Rm - 4, fy(15.0) - 7, '15.0V', 11, '#1c1c1c', anchor='end', weight='600'))
+
+    for pts, col, lab in ((old, C_NG, '旧バッテリー'), (new, '#1baf7a', '新バッテリー')):
+        up, dn, med = [], [], []
+        for lo, hi in BINS:
+            v = sorted(x[1] for x in pts if lo <= x[0] < hi)
+            if len(v) < 30:
+                continue
+            cx = fx((lo + hi) / 2)
+            up.append((cx, fy(min(v[-len(v) // 20 - 1], y1))))
+            dn.append((cx, fy(max(v[len(v) // 20], y0))))
+            med.append((cx, fy(v[len(v) // 2])))
+        if len(med) < 2:
+            continue
+        d = ('M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in up) + ' L'
+             + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in reversed(dn)) + ' Z')
+        s.append(f'<path d="{d}" fill="{col}" opacity="0.15"/>')
+        s.append(_path(med, col, 2.6))
+        for cx, cy in med:
+            s.append(_dot(cx, cy, 3.0, col, 0.95))
+
+    over = lambda g: 100 * sum(1 for x in g if x[1] > 15.0) / len(g)
+    tx = W - Rm + 14
+    y = T + 12
+    s.append(_txt(tx, y, '帯は 5–95%、線は中央値', 11)); y += 26
+    for col, lab, g in ((C_NG, '旧バッテリー', old), ('#1baf7a', '新バッテリー', new)):
+        s.append(_line(tx, y - 4, tx + 20, y - 4, col, 3))
+        s.append(_txt(tx + 26, y, lab, 11.5, col, weight='600')); y += 16
+        s.append(_txt(tx + 8, y, f'n = {len(g):,}', 10.5)); y += 16
+        s.append(_txt(tx + 8, y, f'15V 超  {over(g):.2f}%', 12, col, weight='700')); y += 24
+    for ln, w in (('回転を上げても上がらない。', 'normal'),
+                  ('アイドルから既にレギュ', 'normal'),
+                  ('レータがクランプしている', 'normal'),
+                  ('＝発電は足りている。', '600'), ('', 'normal'),
+                  ('違いは中央値ではなく', 'normal'),
+                  ('散らばりに出た。15V 超は', 'normal'),
+                  ('弱ったバッテリーが充電', 'normal'),
+                  ('電流を飲めない症状で、', 'normal'),
+                  ('発電系の症状ではない。', '600')):
+        if ln:
+            s.append(_txt(tx, y, ln, 10.5, weight=w))
+        y += 14
+    _save(path, s)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--logs', default='private/logs')
@@ -773,6 +873,7 @@ def main():
     fig_gate(f'{a.out}/fig9-gate.svg', runs)
 
     fig_crank(f'{a.out}/figD-cranking.svg', runs[2][1])
+    fig_charging(f'{a.out}/figE-charging.svg', lg)
 
     probe = f'{lg}/probe.bin'
     if os.path.exists(probe):

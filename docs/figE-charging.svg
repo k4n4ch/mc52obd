@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 460" width="820" height="460" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>充電電圧と回転数</title><rect x="0" y="0" width="820" height="460" fill="#ffffff"/>
+<line x1="135.9" y1="74.0" x2="135.9" y2="404.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="135.9" y="421.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">2,000</text>
+<line x1="244.4" y1="74.0" x2="244.4" y2="404.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="244.4" y="421.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">3,000</text>
+<line x1="352.8" y1="74.0" x2="352.8" y2="404.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="352.8" y="421.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">4,000</text>
+<line x1="461.3" y1="74.0" x2="461.3" y2="404.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="461.3" y="421.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">5,000</text>
+<line x1="569.8" y1="74.0" x2="569.8" y2="404.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="569.8" y="421.0" font-size="11" fill="#767f89" text-anchor="middle" font-weight="normal">6,000</text>
+<line x1="60.0" y1="404.0" x2="624.0" y2="404.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="52.0" y="408.0" font-size="11.5" fill="#767f89" text-anchor="end" font-weight="normal">13</text>
+<line x1="60.0" y1="309.7" x2="624.0" y2="309.7" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="52.0" y="313.7" font-size="11.5" fill="#767f89" text-anchor="end" font-weight="normal">14</text>
+<line x1="60.0" y1="215.4" x2="624.0" y2="215.4" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="52.0" y="219.4" font-size="11.5" fill="#767f89" text-anchor="end" font-weight="normal">15</text>
+<line x1="60.0" y1="121.1" x2="624.0" y2="121.1" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="52.0" y="125.1" font-size="11.5" fill="#767f89" text-anchor="end" font-weight="normal">16</text>
+<text x="342.0" y="446.0" font-size="12.5" fill="#767f89" text-anchor="middle" font-weight="normal">エンジン回転数 [rpm]</text>
+<text x="15" y="239" font-size="12.5" fill="#767f89" text-anchor="middle" transform="rotate(-90 15 239)">制御モジュール電圧 [V]</text>
+<text x="60.0" y="34.0" font-size="14" fill="#1c1c1c" text-anchor="start" font-weight="600">充電電圧は回転数に依らない</text>
+<text x="60.0" y="52.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">ELM327・同じ機材でバッテリー交換の前後を比べた（旧 5 本 / 新 5 本）</text>
+<line x1="60.0" y1="215.4" x2="624.0" y2="215.4" stroke="#1c1c1c" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="620.0" y="208.4" font-size="11" fill="#1c1c1c" text-anchor="end" font-weight="600">15.0V</text>
+<path d="M76.3,206.0 L119.7,196.6 L173.9,187.1 L228.1,168.3 L282.3,177.7 L336.6,177.7 L390.8,168.3 L445.0,177.7 L499.3,177.7 L553.5,187.1 L607.7,177.7 L607.7,375.7 L553.5,366.3 L499.3,375.7 L445.0,375.7 L390.8,375.7 L336.6,375.7 L282.3,375.7 L228.1,356.9 L173.9,356.9 L119.7,338.0 L76.3,356.9 Z" fill="#c2410c" opacity="0.15"/>
+<path d="M76.3,319.1 L119.7,309.7 L173.9,319.1 L228.1,319.1 L282.3,328.6 L336.6,328.6 L390.8,328.6 L445.0,328.6 L499.3,328.6 L553.5,328.6 L607.7,328.6" fill="none" stroke="#c2410c" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="76.3" cy="319.1" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="119.7" cy="309.7" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="173.9" cy="319.1" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="228.1" cy="319.1" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="282.3" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="336.6" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="390.8" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="445.0" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="499.3" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="553.5" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="607.7" cy="328.6" r="3.0" fill="#c2410c" opacity="0.95"/>
+<path d="M76.3,262.6 L119.7,262.6 L173.9,272.0 L228.1,262.6 L282.3,262.6 L336.6,262.6 L390.8,262.6 L445.0,262.6 L499.3,262.6 L553.5,262.6 L607.7,272.0 L607.7,347.4 L553.5,347.4 L499.3,347.4 L445.0,347.4 L390.8,356.9 L336.6,356.9 L282.3,347.4 L228.1,347.4 L173.9,347.4 L119.7,347.4 L76.3,347.4 Z" fill="#1baf7a" opacity="0.15"/>
+<path d="M76.3,309.7 L119.7,309.7 L173.9,309.7 L228.1,309.7 L282.3,309.7 L336.6,319.1 L390.8,319.1 L445.0,319.1 L499.3,319.1 L553.5,319.1 L607.7,319.1" fill="none" stroke="#1baf7a" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="76.3" cy="309.7" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="119.7" cy="309.7" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="173.9" cy="309.7" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="228.1" cy="309.7" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="282.3" cy="309.7" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="336.6" cy="319.1" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="390.8" cy="319.1" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="445.0" cy="319.1" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="499.3" cy="319.1" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="553.5" cy="319.1" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="607.7" cy="319.1" r="3.0" fill="#1baf7a" opacity="0.95"/>
+<text x="638.0" y="86.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">帯は 5–95%、線は中央値</text>
+<line x1="638.0" y1="108.0" x2="658.0" y2="108.0" stroke="#c2410c" stroke-width="3"/>
+<text x="664.0" y="112.0" font-size="11.5" fill="#c2410c" text-anchor="start" font-weight="600">旧バッテリー</text>
+<text x="646.0" y="128.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">n = 15,162</text>
+<text x="646.0" y="144.0" font-size="12" fill="#c2410c" text-anchor="start" font-weight="700">15V 超  10.23%</text>
+<line x1="638.0" y1="164.0" x2="658.0" y2="164.0" stroke="#1baf7a" stroke-width="3"/>
+<text x="664.0" y="168.0" font-size="11.5" fill="#1baf7a" text-anchor="start" font-weight="600">新バッテリー</text>
+<text x="646.0" y="184.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">n = 19,406</text>
+<text x="646.0" y="200.0" font-size="12" fill="#1baf7a" text-anchor="start" font-weight="700">15V 超  0.00%</text>
+<text x="638.0" y="224.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">回転を上げても上がらない。</text>
+<text x="638.0" y="238.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">アイドルから既にレギュ</text>
+<text x="638.0" y="252.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">レータがクランプしている</text>
+<text x="638.0" y="266.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="600">＝発電は足りている。</text>
+<text x="638.0" y="294.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">違いは中央値ではなく</text>
+<text x="638.0" y="308.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">散らばりに出た。15V 超は</text>
+<text x="638.0" y="322.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">弱ったバッテリーが充電</text>
+<text x="638.0" y="336.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">電流を飲めない症状で、</text>
+<text x="638.0" y="350.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="600">発電系の症状ではない。</text>
+</svg>
