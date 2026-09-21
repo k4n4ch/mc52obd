@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" width="720" height="420" font-family="-apple-system,'Helvetica Neue',Arial,'Hiragino Sans',Meiryo,sans-serif" role="img"><title>車速の丸め方の同定</title><rect x="0" y="0" width="720" height="420" fill="#ffffff"/>
+<text x="66.0" y="34.0" font-size="14.5" fill="#1c1c1c" text-anchor="start" font-weight="600">0D は四捨五入ではなく切り捨て</text>
+<text x="66.0" y="53.0" font-size="11" fill="#767f89" text-anchor="start" font-weight="normal">段ごとに独立にスケール係数を当てる。剛体連結なら全段同一のはず（ELM327 実走 n=28,941）</text>
+<line x1="66.0" y1="76.0" x2="66.0" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="66.0" y="382.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">1速</text>
+<line x1="154.8" y1="76.0" x2="154.8" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="154.8" y="382.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">2速</text>
+<line x1="243.6" y1="76.0" x2="243.6" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="243.6" y="382.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">3速</text>
+<line x1="332.4" y1="76.0" x2="332.4" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="332.4" y="382.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">4速</text>
+<line x1="421.2" y1="76.0" x2="421.2" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="421.2" y="382.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">5速</text>
+<line x1="510.0" y1="76.0" x2="510.0" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="510.0" y="382.0" font-size="11.5" fill="#767f89" text-anchor="middle" font-weight="normal">6速</text>
+<line x1="66.0" y1="364.0" x2="510.0" y2="364.0" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="58.0" y="368.0" font-size="11" fill="#767f89" text-anchor="end" font-weight="normal">1.000</text>
+<line x1="66.0" y1="298.5" x2="510.0" y2="298.5" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="58.0" y="302.5" font-size="11" fill="#767f89" text-anchor="end" font-weight="normal">1.005</text>
+<line x1="66.0" y1="233.1" x2="510.0" y2="233.1" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="58.0" y="237.1" font-size="11" fill="#767f89" text-anchor="end" font-weight="normal">1.010</text>
+<line x1="66.0" y1="167.6" x2="510.0" y2="167.6" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="58.0" y="171.6" font-size="11" fill="#767f89" text-anchor="end" font-weight="normal">1.015</text>
+<line x1="66.0" y1="102.2" x2="510.0" y2="102.2" stroke="#808a94" stroke-width="1" stroke-opacity="0.18"/>
+<text x="58.0" y="106.2" font-size="11" fill="#767f89" text-anchor="end" font-weight="normal">1.020</text>
+<text x="17" y="220" font-size="12" fill="#767f89" text-anchor="middle" transform="rotate(-90 17 220)">当てはめたスケール係数</text>
+<line x1="66.0" y1="289.4" x2="510.0" y2="289.4" stroke="#1c1c1c" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="506.0" y="282.4" font-size="10.5" fill="#1c1c1c" text-anchor="end" font-weight="normal">k = 1.0057</text>
+<path d="M66.0,170.4 L154.8,142.7 L243.6,151.2 L332.4,168.4 L421.2,188.8 L510.0,212.8" fill="none" stroke="#c2410c" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="66.0" cy="170.4" r="4.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="154.8" cy="142.7" r="4.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="243.6" cy="151.2" r="4.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="332.4" cy="168.4" r="4.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="421.2" cy="188.8" r="4.0" fill="#c2410c" opacity="0.95"/>
+<circle cx="510.0" cy="212.8" r="4.0" fill="#c2410c" opacity="0.95"/>
+<path d="M66.0,290.0 L154.8,295.4 L243.6,285.8 L332.4,291.5 L421.2,294.9 L510.0,291.8" fill="none" stroke="#1baf7a" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="66.0" cy="290.0" r="4.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="154.8" cy="295.4" r="4.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="243.6" cy="285.8" r="4.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="332.4" cy="291.5" r="4.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="421.2" cy="294.9" r="4.0" fill="#1baf7a" opacity="0.95"/>
+<circle cx="510.0" cy="291.8" r="4.0" fill="#1baf7a" opacity="0.95"/>
+<line x1="526.0" y1="78.0" x2="546.0" y2="78.0" stroke="#c2410c" stroke-width="3.2"/>
+<text x="553.0" y="82.0" font-size="12" fill="#c2410c" text-anchor="start" font-weight="600">生値</text>
+<text x="534.0" y="100.0" font-size="11.5" fill="#c2410c" text-anchor="start" font-weight="normal">ばらつき 0.53%</text>
+<line x1="526.0" y1="122.0" x2="546.0" y2="122.0" stroke="#1baf7a" stroke-width="3.2"/>
+<text x="553.0" y="126.0" font-size="12" fill="#1baf7a" text-anchor="start" font-weight="600">車速 + 0.5</text>
+<text x="534.0" y="144.0" font-size="11.5" fill="#1baf7a" text-anchor="start" font-weight="normal">ばらつき 0.07%</text>
+<text x="526.0" y="170.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">生値では 2 速から上が</text>
+<text x="526.0" y="184.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">段ごとに単調に下がる。</text>
+<text x="526.0" y="198.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">剛体で連結されている</text>
+<text x="526.0" y="212.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">以上、全段同一でなければ</text>
+<text x="526.0" y="226.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">ならない。</text>
+<text x="526.0" y="254.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">車速に +0.5 を戻すと</text>
+<text x="526.0" y="268.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="600">ばらつきが 1 桁潰れる。</text>
+<text x="526.0" y="296.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="normal">切り捨てだから、真値は</text>
+<text x="526.0" y="310.0" font-size="10.5" fill="#767f89" text-anchor="start" font-weight="600">区間の中央にある。</text>
+</svg>

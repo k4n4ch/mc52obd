@@ -885,6 +885,195 @@ def _sd(g):
 
 
 
+
+# ── 前編（標準層）の図 ─────────────────────────────────────
+def load_elm_gear(logdir):
+    """ELM327 のログから (回転数, 車速) を集める。判定の下限を満たす行のみ。"""
+    out = []
+    for f in sorted(glob.glob(f'{logdir}/mc52_*.csv')) + sorted(glob.glob(f'{logdir}/cb250r_*.csv')):
+        for r in csv.DictReader(open(f, encoding='utf-8')):
+            try:
+                rpm, spd = float(r['rpm']), float(r['speed_obd'])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if rpm > 1700 and spd >= 8:
+                out.append((rpm, spd))
+    return out
+
+
+def fig_truncation(path, logdir):
+    """`0D` は四捨五入ではなく切り捨て。段ごとに当てた `k` の単調なずれが証拠。"""
+    rows = load_elm_gear(logdir)
+    if len(rows) < 1000:
+        print(f'  （{path}: ELM327 のログが足りないので作らない）')
+        return
+    fit = {}
+    for off in (0.0, 0.5):
+        d = {}
+        for n in GEARS:
+            v = sorted(r / (s + off) / R[n] for r, s in rows
+                       if abs(r / (s + off) / R[n] - 1) < 0.04)
+            if len(v) >= 50:
+                d[n] = v[len(v) // 2]
+        fit[off] = d
+
+    W, H = 720, 420
+    L, Rm, T, B = 66, 210, 76, 56
+    y0, y1 = 1.000, 1.022
+    fx = lambda n: L + (n - 1) / 5 * (W - L - Rm)
+    fy = lambda v: H - B - (v - y0) / (y1 - y0) * (H - T - B)
+    s = [_hdr(W, H, '車速の丸め方の同定')]
+    s.append(_txt(L, T - 42, '`0D` は四捨五入ではなく切り捨て'.replace('`', ''), 14.5,
+                  '#1c1c1c', weight='600'))
+    s.append(_txt(L, T - 23, f'段ごとに独立にスケール係数を当てる。剛体連結なら全段同一の'
+                             f'はず（ELM327 実走 n={len(rows):,}）', 11))
+    for n in GEARS:
+        s.append(_line(fx(n), T, fx(n), H - B, C_GR, 1, op=0.18))
+        s.append(_txt(fx(n), H - B + 18, f'{n}速', 11.5, anchor='middle'))
+    for v in (1.000, 1.005, 1.010, 1.015, 1.020):
+        s.append(_line(L, fy(v), W - Rm, fy(v), C_GR, 1, op=0.18))
+        s.append(_txt(L - 8, fy(v) + 4, f'{v:.3f}', 11, anchor='end'))
+    s.append(f'<text x="17" y="{(T+H-B)/2:.0f}" font-size="12" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 17 {(T+H-B)/2:.0f})">'
+             f'当てはめたスケール係数</text>')
+    s.append(_line(L, fy(K), W - Rm, fy(K), '#1c1c1c', 1.4, dash='5 4'))
+    s.append(_txt(W - Rm - 4, fy(K) - 7, f'k = {K}', 10.5, '#1c1c1c', anchor='end'))
+    for off, col, lab in ((0.0, C_NG, '生値'), (0.5, '#1baf7a', '車速 + 0.5')):
+        pts = [(fx(n), fy(min(max(v, y0), y1))) for n, v in sorted(fit[off].items())]
+        s.append(_path(pts, col, 2.6))
+        for cx, cy in pts:
+            s.append(_dot(cx, cy, 4.0, col, 0.95))
+    tx = W - Rm + 16
+    y = T + 6
+    for off, col, lab in ((0.0, C_NG, '生値'), (0.5, '#1baf7a', '車速 + 0.5')):
+        v = list(fit[off].values())
+        sp = 100 * (max(v) - min(v)) / sorted(v)[len(v) // 2]
+        s.append(_line(tx, y - 4, tx + 20, y - 4, col, 3.2))
+        s.append(_txt(tx + 27, y, lab, 12, col, weight='600')); y += 18
+        s.append(_txt(tx + 8, y, f'ばらつき {sp:.2f}%', 11.5, col)); y += 26
+    for ln, w in (('生値では 2 速から上が', 'normal'), ('段ごとに単調に下がる。', 'normal'),
+                  ('剛体で連結されている', 'normal'), ('以上、全段同一でなければ', 'normal'),
+                  ('ならない。', 'normal'), ('', 'normal'),
+                  ('車速に +0.5 を戻すと', 'normal'), ('ばらつきが 1 桁潰れる。', '600'),
+                  ('', 'normal'),
+                  ('切り捨てだから、真値は', 'normal'), ('区間の中央にある。', '600')):
+        if ln:
+            s.append(_txt(tx, y, ln, 10.5, weight=w))
+        y += 14
+    _save(path, s)
+
+
+def fig_window(path):
+    """判定窓は段ごとに 3.5 倍違う。一律の値を使うと厳しさがばらつく。"""
+    W, H = 720, 400
+    L, Rm, T, B = 66, 200, 76, 56
+    y1 = 22.0
+    xs = list(TOL_PAIR)
+    fx = lambda i: L + (i - 0.5) / len(xs) * (W - L - Rm)
+    fy = lambda v: H - B - v / y1 * (H - T - B)
+    s = [_hdr(W, H, '判定窓の上限は段ごとに違う')]
+    s.append(_txt(L, T - 42, '隣接段が触れ合う上限は段ごとに 3.5 倍違う', 14.5,
+                  '#1c1c1c', weight='600'))
+    s.append(_txt(L, T - 23, '窓を |比 / 予測 − 1| ≤ t と定義したとき、'
+                             '隣の段の窓と触れ合う t（諸元から算出）', 11))
+    for v in range(0, int(y1) + 1, 5):
+        s.append(_line(L, fy(v), W - Rm, fy(v), C_GR, 1, op=0.18))
+        s.append(_txt(L - 8, fy(v) + 4, f'{v}', 11.5, anchor='end'))
+    s.append(f'<text x="17" y="{(T+H-B)/2:.0f}" font-size="12" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 17 {(T+H-B)/2:.0f})">'
+             f'触れ合う上限 [%]</text>')
+    bw = (W - L - Rm) / len(xs) * 0.52
+    for i, n in enumerate(xs, 1):
+        v = TOL_PAIR[n]
+        s.append(f'<rect x="{fx(i) - bw/2:.1f}" y="{fy(v):.1f}" width="{bw:.1f}" '
+                 f'height="{H - B - fy(v):.1f}" fill="{GC[n]}" opacity="0.75" rx="2"/>')
+        s.append(_txt(fx(i), fy(v) - 8, f'{v:.2f}', 11.5, GC[n], anchor='middle',
+                      weight='700'))
+        s.append(_txt(fx(i), H - B + 18, f'{n}-{n+1}速', 11.5, anchor='middle'))
+    s.append(_line(L, fy(TOL), W - Rm, fy(TOL), '#1c1c1c', 1.6, dash='6 4'))
+    s.append(_txt(L + 6, fy(TOL) - 7, f'一律に {TOL:.1f}% を使った場合', 11, '#1c1c1c',
+                  weight='600'))
+    tx = W - Rm + 16
+    y = T + 10
+    for ln, w in (('一律 4.0% は、', 'normal'),
+                  ('5-6速では上限の 69% を', 'normal'), ('許すのに、', 'normal'),
+                  ('1-2速では 19% しか', 'normal'), ('許さない。', 'normal'), ('', 'normal'),
+                  ('最も余裕のある低速段で', 'normal'), ('最も厳しく切っていた。', '600'),
+                  ('', 'normal'),
+                  ('そこで「境界までの', 'normal'), ('何割か」を一定にする。', '600'),
+                  ('', 'normal'),
+                  ('実測 12 本 28,967 行で', 'normal'),
+                  ('確定 94.0% → 98.1%。', '600'),
+                  ('割り当ては 1 つも', 'normal'), ('変わらない。', 'normal')):
+        if ln:
+            s.append(_txt(tx, y, ln, 10.5, weight=w))
+        y += 14
+    _save(path, s)
+
+
+def fig_clusters(path, logdir):
+    """標準層だけで見た比の散布。クラスタは見えるが、外れた点の素性が分からない。"""
+    rows = load_elm_gear(logdir)
+    if len(rows) < 1000:
+        print(f'  （{path}: ELM327 のログが足りないので作らない）')
+        return
+    W, H = 720, 440
+    L, Rm, T, B = 60, 196, 76, 56
+    x0, x1, y0, y1 = 0, 110, 50, 250
+    fx = lambda v: L + (v - x0) / (x1 - x0) * (W - L - Rm)
+    fy = lambda v: H - B - (v - y0) / (y1 - y0) * (H - T - B)
+    s = [_hdr(W, H, '比のクラスタ（標準層）')]
+    s.append(_txt(L, T - 42, '比は段ごとに定数になるが、外れた点の素性は分からない', 14.5,
+                  '#1c1c1c', weight='600'))
+    s.append(_txt(L, T - 23, f'ELM327 実走 n={len(rows):,}。横線は諸元から計算した'
+                             f'各段の理論比', 11))
+    for v in range(0, x1 + 1, 20):
+        s.append(_line(fx(v), T, fx(v), H - B, C_GR, 1, op=0.18))
+        s.append(_txt(fx(v), H - B + 17, f'{v}', 11.5, anchor='middle'))
+    for v in range(50, y1 + 1, 50):
+        s.append(_txt(L - 8, fy(v) + 4, f'{v}', 11.5, anchor='end'))
+    s.append(_txt((L + W - Rm) / 2, H - 14, '車速（ECU 生値）[km/h]', 12, anchor='middle'))
+    s.append(f'<text x="15" y="{(T+H-B)/2:.0f}" font-size="12" fill="{C_TX}" '
+             f'text-anchor="middle" transform="rotate(-90 15 {(T+H-B)/2:.0f})">'
+             f'比　回転数 ÷ 車速 [rpm/(km/h)]</text>')
+    for n in GEARS:
+        y = fy(K * R[n])
+        s.append(_line(L, y, W - Rm, y, GC[n], 1.5, op=0.85))
+        s.append(_txt(L + 5, y - 4, f'{n}速', 11, GC[n], weight='600'))
+    # 画素セルに丸めて数え、濃度を 3 段で描く（点を 1 つずつ置くと巨大になる）
+    cell = collections.Counter()
+    out = 0
+    for rpm, spd in rows:
+        ratio = rpm / (spd + 0.5)
+        if not (x0 <= spd <= x1 and y0 <= ratio <= y1):
+            out += 1
+            continue
+        cell[(round(fx(spd)), round(fy(ratio)))] += 1
+    for lo, hi, op in ((1, 2, 0.20), (3, 9, 0.42), (10, 10 ** 9, 0.75)):
+        d = ''.join(f'M{x},{y}h0' for (x, y), c in cell.items() if lo <= c <= hi)
+        if d:
+            s.append(f'<path d="{d}" stroke="#1c1c1c" stroke-width="2.6" '
+                     f'stroke-opacity="{op}" stroke-linecap="round" fill="none"/>')
+    tx = W - Rm + 14
+    y = T + 10
+    s.append(_txt(tx, y, f'枠外 {out:,} 点', 10.5)); y += 26
+    for ln, w in (('6 本の線に帯が立つ。', 'normal'),
+                  ('比推定が成立する根拠。', 'normal'), ('', 'normal'),
+                  ('一方、線から外れた点が', 'normal'),
+                  ('半クラなのか、クラッチを', 'normal'),
+                  ('切った惰行なのか、', 'normal'),
+                  ('変速の最中なのかは、', 'normal'),
+                  ('**この平面では区別が', '600'), ('つかない。**', '600'), ('', 'normal'),
+                  ('とくに 20〜40km/h・', 'normal'),
+                  ('1,700〜2,400rpm では、', 'normal'),
+                  ('クラッチ切りが本物の', 'normal'),
+                  ('6速と数値的に重なる。', '600')):
+        if ln:
+            s.append(_txt(tx, y, ln.replace('**', ''), 10.5, weight=w))
+        y += 14
+    _save(path, s)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--logs', default='private/logs')
@@ -906,6 +1095,10 @@ def main():
     fig_band(f'{a.out}/fig7-band.svg', two)
     fig_tol(f'{a.out}/fig8-tolerance.svg', [r for _, rs in runs for r in rs])
     fig_gate(f'{a.out}/fig9-gate.svg', runs)
+
+    fig_truncation(f'{a.out}/figS1-truncation.svg', lg)
+    fig_window(f'{a.out}/figS2-window.svg')
+    fig_clusters(f'{a.out}/figS3-clusters.svg', lg)
 
     fig_crank(f'{a.out}/figD-cranking.svg', runs[2][1])
     fig_charging(f'{a.out}/figE-charging.svg', lg)
