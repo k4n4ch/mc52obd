@@ -483,7 +483,7 @@ Honda CB250R（2BK-MC52）の標準 OBD 層について、以下を確定した�
 ## 関連文書
 
 - [`mc52-proprietary-layer.md`](mc52-proprietary-layer.md) — 後編。本レポートが
-  「標準層には存在しない」とした 3 つの量を、同じ K 線の別プロトコルから取得する
+  「標準層には存在しない」とした 3 つの量を、同じ K-Lineの別プロトコルから取得する
 - [`FINDINGS.md`](FINDINGS.md) — 実測の全量（肯定・否定の両方）
 - [`GEARING.md`](GEARING.md) — スプロケット丁数と走行余力
 - [`gear.md`](gear.md) — ギヤ判定と車速補正の実装仕様

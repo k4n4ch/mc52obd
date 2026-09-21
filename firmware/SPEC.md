@@ -62,7 +62,7 @@ flowchart LR
 | | |
 |---|---|
 | MCU | ESP32-S3-WROOM-1-**N16R8**（16MB フラッシュ / 8MB PSRAM） |
-| K ライン | `IO17` = TX / `IO18` = RX（`HardwareSerial(1)`）。トランシーバは L9637D |
+| K-Line | `IO17` = TX / `IO18` = RX（`HardwareSerial(1)`）。トランシーバは L9637D |
 | 表示器（未使用） | `IO9`〜`IO12`（`J2`）。`R3` `R4` 4.7kΩ プルアップ |
 | 書き込み | `J3` 圧入 5 極（GND / TXD0 / RXD0 / EN / IO0）。**USB は配線されていない** |
 | シリアル | `Serial` = UART0（`J3`）。`ARDUINO_USB_CDC_ON_BOOT=0` が必須 |
@@ -81,7 +81,7 @@ flowchart LR
 `uploadfs` がラベル `spiffs` を引くので、`littlefs` と名付けると
 `partition "spiffs" could not be found` で落ちる。
 
-## 3. K ラインの物理仕様
+## 3. K-Lineの物理仕様
 
 **単線半二重。** 送信波形がそのまま RX に戻る（エコー）。
 
@@ -104,7 +104,7 @@ K を 12V に吊っているので、K が開放端なら TX→K→RX が閉じ�
 ```mermaid
 sequenceDiagram
   participant B as 基板
-  participant K as K ライン
+  participant K as K-Line
   participant E as ECU
   B->>B: 受信バッファを空にする
   B->>B: 要求を T_REQ として記録<br/>何を訊いたかが対で残る
@@ -330,7 +330,7 @@ END <CRC32 の 8 桁 hex>
 - **`Serial.print`。** 171 バイトを 115200bps へ流すと 14.8ms かかる。予算を 20 → 200ms に
   広げても 6.5 → 6.8KB/s しか動かず、**データ行を Serial へ出すのをやめて 15.2KB/s**。
   Serial は BLE が死んだときの逃げ道で、base64 を 100KB 流す先ではない
-- **`pollTick()` がループを占有する。** K ラインの往復は同期処理なので、転送はその
+- **`pollTick()` がループを占有する。** K-Lineの往復は同期処理なので、転送はその
   すきまでしか進まない。だから `poll` 稼働中は遅い。**帯域ではなくループの取り分の問題**
 
 **1 時間の走行（1.11MB）なら、停止後の転送で約 73 秒。** 3 時間なら 3.6 分。長い走行では
@@ -461,7 +461,7 @@ sequenceDiagram
 | `get` | **25KB/s** | base64 + notify |
 | `poll` 2 テーブル | **2.04Hz** | ECU なし（全部無応答＝待ち 200ms を使い切る） |
 | `poll` 1 テーブル | **3.3Hz** | 同上 |
-| K ライン | 10400bps で 1024 バイト誤り 0。**115.2kbps まで誤り 0 = 速度で 11 倍の余裕** | L9637D を VCC=3.3V で駆動（データシートの試験条件は 5V のみ） |
+| K-Line | 10400bps で 1024 バイト誤り 0。**115.2kbps まで誤り 0 = 速度で 11 倍の余裕** | L9637D を VCC=3.3V で駆動（データシートの試験条件は 5V のみ） |
 | ファーム | Flash 67.5%（1415793 / 2097152）/ RAM 22.8% | `explore` |
 
 **応答があれば `poll` はこれより速くなる。** 上の数字は無応答時の下限 ——
