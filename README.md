@@ -20,10 +20,14 @@ Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるか
 
 **作業状況・次の手順・保留事項は [HANDOFF.md](HANDOFF.md) に集約している。**
 
-**成果を 1 本にまとめたレポートが
-[docs/mc52-kline-analysis.md](docs/mc52-kline-analysis.md)。**
-標準層の全数確定・車速信号の同定・ギヤ比推定の定式化・独自層 7 テーブルの同定・
-駆動フラグによる判定則の評価まで。まず読むならここ。
+**成果は 2 本のレポートにまとめてある。まず読むならここ。**
+
+- **[前編 docs/mc52-standard-layer.md](docs/mc52-standard-layer.md)** ——
+  標準 OBD 層で取得できる範囲の全数確定、車速信号の同定、ギヤ比推定の定式化と
+  その原理的限界。**市販のドングルと変換ケーブルだけで再現できる範囲**
+- **[後編 docs/mc52-proprietary-layer.md](docs/mc52-proprietary-layer.md)** ——
+  同じ K 線に載るメーカー独自プロトコルの同定（規格と一致するのは物理層だけ）、
+  噴射時間と駆動状態の取得、そして**前編の推定則を真値で評価する**
 
 実測結果の全量は [FINDINGS.md](docs/FINDINGS.md)、フロントスプロケット 14T / 15T の
 走行余力比較は [GEARING.md](docs/GEARING.md)。**次にどの走行で何が埋まるかは
