@@ -250,8 +250,9 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
         新しいログは自動で取り込む）</li>
       <li><b>REC が「待機」ならまだ保存されていない。</b>基板は最初の応答が返るまで
         ファイルを開かない。応答が来れば「REC」（赤）に変わる</li>
-      <li><code>auto</code> を使っていないなら<b>「REC」</b>。チップが赤くなり
-        <b>Hz が出る</b>のを確認する</li>
+      <li><code>auto</code> を使っていないとき、または「停止・取込」の後に再開するときは
+        <b>「REC」</b>。<b>基板に保存した設定（<code>auto on</code> の引数）で記録する</b>。
+        チップが赤くなり <b>Hz が出る</b>のを確認する</li>
       <li>走る。<b>BLE が切れても記録は続く</b>のでポケットに入れて構わない</li>
       <li><b>停車したら、エンジンを掛けたまま「停止・取込」を押す。</b>
         記録の停止・測位の書き出し・ログの回収を 1 つでやる</li>
@@ -289,7 +290,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 </div>
 
 <script>
-const VERSION = 'v20260919e';
+const VERSION = 'v20260925a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -858,13 +859,6 @@ async function drain() {
 }
 
 // ── 記録 ──────────────────────────────────────────────
-function stamp() {
-  const d = new Date(), p = n => String(n).padStart(2, '0');
-  // **ファイル名に端末の時刻を焼く。** 基板は電源を切ると時計を失うので、
-  // 名前が絶対時刻の手掛かりとして残る
-  return 'r' + String(d.getFullYear()).slice(2) + p(d.getMonth() + 1) + p(d.getDate())
-       + '_' + p(d.getHours()) + p(d.getMinutes());
-}
 
 async function stopRec() {
   if (!recOn) return;
@@ -898,11 +892,11 @@ async function toggleRec() {
   if (recOn) { await stopRec(); stopGps(); chip($('cGps'), false, 'GPS'); return; }
   $('bRec').disabled = true;
   say('\n[記録開始]\n');
-  await send('w');                                   // 独自層を起こす
+  /* **テーブルと周期はページに持たない。** 以前は `poll D1 11 200` を決め打ちで
+   * 送っていて、基板に保存した `auto` の設定と食い違った。`auto go` は起動時と
+   * 同じ手順（必要なら w → 連番ファイル → snap → poll）を保存した設定で踏む。 */
+  await send('auto go');
   await new Promise(r => setTimeout(r, 3000));
-  await send('rec on ' + stamp());
-  await new Promise(r => setTimeout(r, 600));
-  await send('poll D1 11 200');
   recOn = true;
   chip($('cRec'), true, 'REC', 'rec');
   $('bRec').classList.add('active');
