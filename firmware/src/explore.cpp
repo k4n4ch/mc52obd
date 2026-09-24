@@ -325,7 +325,11 @@ static void pollTick() {
   bool gotAny = false;
   for (int i = 0; i < pollN; i++) {
     int n = readTable(pollTbl[i], r, sizeof r, 200);
-    if (n > 0) gotAny = true;
+    /* **生きている証拠は、長さとチェックサムが合った応答だけ。** 線上のノイズで
+     * 1 バイトの `FF` が返ると `n = 1` になり、これを数えていたので無応答カウンタが
+     * 毎回リセットされ、ECU が寝たまま 84 秒 `w` を打ち直さなかった（auto0013）。
+     * 断片は xfer がログに残すので、診断の手掛かりは失わない。 */
+    if (n >= 3 && r[1] == n && csOk2c(r, n)) gotAny = true;
     int p = snprintf(line, sizeof line, "P %lu %02X",
                      (unsigned long)(millis() - pollT0), pollTbl[i]);
     if (n <= 0) p += snprintf(line + p, sizeof line - p, " -");
@@ -941,6 +945,7 @@ static void help() {
       "  snap                実在 7 テーブルを 1 回ずつ（約 0.7 秒）。**auto の起動時に自動で撮る**\n"
       "  auto on [引数]      **キーを回したら自動で w → rec on → poll**（NVS に残る）\n"
       "  auto off            解除   auto だけで状態\n"
+      "  auto go             **保存した設定で今すぐ記録**（停止後の再開。auto off でも効く）\n"
       "[標準層] 足場。ELM327 で既に取れているもの\n"
       "  o           fast init して 0C / 0D を読む\n"
       "[物理層]\n"
@@ -1053,18 +1058,20 @@ static void cmdSess() {
  * **壁時計は入らない**（RTC が無い）。ファイル名は NVS の連番にする。絶対時刻は
  * スマホが接続したときに入る想定で、GPS との突合はスマホの時計に乗った測位ログと
  * 合わせる。**車速バイトの校正には GPS が要る**ので、走行時はスマホが前提になる。 */
+static void autoRun(bool manual);
 static void cmdAuto(char *arg) {
   prefs.begin("mc52", false);
   if (!*arg) {
     outf("自動開始 %s（poll %s、次の連番 %d）\n",
          prefs.getInt("au", 0) ? "**入**" : "切",
          prefs.getString("ap", "D1 11 200").c_str(), prefs.getInt("aseq", 0) + 1);
-    out("  auto on [テーブル.. 周期ms]  /  auto off\n");
+    out("  auto on [テーブル.. 周期ms]  /  auto off  /  auto go（今すぐこの設定で記録）\n");
     prefs.end(); return;
   }
   if (!strncmp(arg, "off", 3) || *arg == '0') {
     prefs.putInt("au", 0); prefs.end(); out("自動開始 切\n"); return;
   }
+  if (!strncmp(arg, "go", 2)) { prefs.end(); autoRun(true); return; }
   if (!strncmp(arg, "on", 2)) {
     char *p = arg + 2; while (*p == ' ') p++;
     if (*p) prefs.putString("ap", p);
@@ -1074,18 +1081,23 @@ static void cmdAuto(char *arg) {
     prefs.end(); return;
   }
   prefs.end();
-  out("auto on [テーブル.. 周期ms]  /  auto off  /  auto（状態）\n");
+  out("auto on [テーブル.. 周期ms]  /  auto off  /  auto go  /  auto（状態）\n");
 }
 
-static void autoStart() {
+/* **起動時の自動記録と、手動の再開（`auto go`）は同じ手順を踏む。**
+ * 手動再開の経路がページ側に `poll D1 11 200` を決め打ちで持っていて、保存した
+ * 設定と食い違った。**設定の置き場を NVS の 1 か所にする。** 手動では `au`
+ * （自動開始の入切）を見ない —— 「今の設定で記録する」だけの意味にする。 */
+static void autoRun(bool manual) {
+  if (recOn || recArmed) { out("記録中（または待機中）。先に rec off\n"); return; }
   prefs.begin("mc52", true);
   bool on = prefs.getInt("au", 0) != 0;
   String pollArg = prefs.getString("ap", "D1 11 200");
   int seq = prefs.getInt("aseq", 0) + 1;
   prefs.end();
-  if (!on) return;
-  outf("\n**自動開始が有効。** poll %s\n", pollArg.c_str());
-  delay(2000);                     // ECU 側の立ち上がりを待つ
+  if (!on && !manual) return;
+  outf("\n**%s** poll %s\n", manual ? "手動で記録を始める。" : "自動開始が有効。", pollArg.c_str());
+  if (!manual) delay(2000);        // ECU 側の立ち上がりを待つ（手動では既に起きている）
   for (int i = 0; i < 3 && !propUp; i++) {
     cmdPropInit();
     if (!propUp) delay(1500);
@@ -1095,7 +1107,8 @@ static void autoStart() {
   char name[32]; snprintf(name, sizeof name, "auto%04d", seq);
   cmdRec(name);                       // 武装するだけ。最初の応答でファイルが開く
   char note[96];
-  int nl = snprintf(note, sizeof note, "auto seq=%d prop=%s", seq, propUp ? "ok" : "FAIL");
+  int nl = snprintf(note, sizeof note, "auto seq=%d prop=%s%s", seq, propUp ? "ok" : "FAIL",
+                    manual ? " manual" : "");
   strncpy(pendingNote, note, sizeof pendingNote - 1);   // 開いたら先頭に書く
   pendingNoteLen = nl < (int)sizeof pendingNote ? nl : (int)sizeof pendingNote - 1;
   /* **実在 7 本のスナップショットを 1 回だけ撮る。** 価値があるのは `0x61`（凍結）が
@@ -1229,7 +1242,7 @@ void setup() {
 
   help();
   out("BLE: MC52-explore として広告中\n");
-  autoStart();        // NVS のフラグが立っていれば、ここで記録が始まる
+  autoRun(false);     // NVS のフラグが立っていれば、ここで記録が始まる
 }
 
 void loop() {
