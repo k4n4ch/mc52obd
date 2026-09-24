@@ -258,6 +258,8 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
         記録の停止・測位の書き出し・ログの回収を 1 つでやる</li>
       <li>CRC 一致を確認して<b>キーオフ</b>。<b>転送しきれなければ切ってよい</b> ——
         次回接続時に裏で続ける</li>
+      <li><b>走行のパートが全部そろうと、ビュワー用の <code>走行名.csv</code> が自動で落ちる。</b>
+        ビュワーにはこれを入れる（<code>.bin</code> は生データの保存用）。取り直しは一覧の <b>CSV</b></li>
       <li>「測位を書き出す」で CSV と GPX が端末に落ちる</li>
     </ol>
   </details>
@@ -289,8 +291,9 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
   </details>
 </div>
 
+<script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20260924a';
+const VERSION = 'v20260925a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -364,7 +367,7 @@ async function connect() {
     await send('note t=' + epoch);
     await send('rec');                 // 記録中のファイル名を知る（転送から除く）
     await new Promise(r => setTimeout(r, 400));
-    queue = []; seen = {}; sessAt = {};
+    queue = []; seen = {}; lsFresh = false; sessAt = {};
     await send('sess');                // セッションの開始時刻（auto は名前に入らない）
     await send('ls');                  // 未転送を洗い出す
     setTimeout(() => { baseDone ? drain() : askFirst(); }, 1800);
@@ -390,7 +393,7 @@ function feed(v) {
     rxBuf = rxBuf.slice(i + 1);
     if (line.startsWith('P ')) onFrame(line);
     else if (xferLine(line)) { renderFiles(); }
-    else if (lsLine(line) || sessLine(line)) { /* 一覧は表示側で持つ */ }
+    else if (lsLine(line) || sessLine(line) || lsEnd(line)) { /* 一覧は表示側で持つ */ }
     else if (line.trim()) {
       say(line + '\n');
       // 記録中のファイルは転送してはいけない（追記中のものを吸うと壊れる）
@@ -673,6 +676,8 @@ function xferLine(line) {
       try { localStorage.setItem(LS_GOT, JSON.stringify(got)); } catch (e) {}
       dlBin(xf.name, buf);
       say(`[転送完了 ${xf.name} CRC 一致]\n`);
+      const nm = xf.name;
+      stashPart(nm, buf).then(ok => { if (ok) maybeCsv(baseOf(nm)); });
     } else {
       say(`[転送失敗 ${xf.name} ${buf.length}/${xf.size}B CRC ${have.toString(16)}≠${want.toString(16)}]\n`);
     }
@@ -691,8 +696,126 @@ function dlBin(name, buf) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
+/* ══════════════════════════════════════════════════════════
+ * 1 走行ぶんを CSV にして払い出す
+ *
+ * **.bin は生データの保存用で、ビュワーが読むのは CSV。** 変換は klcsv.js（Mac の
+ * tools/bin2csv.mjs と同じ実装）。パートは何回かの接続にまたがって届くので、
+ * **届いた中身を IndexedDB に取っておき、走行のパートがそろった時点で組み立てる。**
+ *
+ * - **そろった**とは、今の接続の `ls` に載っているその走行のパートが全部手元にあり、
+ *   記録中でないこと。基板が空きを作るために先に消したパートは戻らないので、
+ *   **手元にある分だけで作って打ち切る**（欠けは時刻の飛びとして CSV に残る）
+ * - 測位はこのページが持っているもの。時刻のアンカーが無い走行は klcsv.js が
+ *   車速と GPS 速度の相互相関で合わせる
+ * - **払い出したら、直前の 1 走行を残して消す。** 端末への保存が成功したかは
+ *   ページから確かめられないので、1 世代だけ取り直しの余地を残す（一覧の `CSV`）
+ * ══════════════════════════════════════════════════════════ */
+const IDB = (() => {
+  let p = null;
+  return () => p || (p = new Promise((res, rej) => {
+    const q = indexedDB.open('mc52-parts', 1);
+    q.onupgradeneeded = () => {
+      q.result.createObjectStore('parts', {keyPath: 'name'});   // {name, base, u8, at}
+      q.result.createObjectStore('done', {keyPath: 'base'});    // {base, at, gaps}
+    };
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  }));
+})();
+function idb(store, mode, fn) {
+  return IDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(store, mode);
+    const r = fn(tx.objectStore(store));
+    tx.oncomplete = () => res(r && 'result' in r ? r.result : undefined);
+    tx.onerror = () => rej(tx.error);
+  }));
+}
+
+let stashed = new Set();                 // IndexedDB に中身がある走行（一覧の `CSV`）
+const csvBusy = new Set();
+async function refreshStashed() {
+  try { stashed = new Set((await idb('parts', 'readonly', s => s.getAllKeys())).map(baseOf)); }
+  catch (e) { stashed = new Set(); }
+  renderFiles();
+}
+
+async function stashPart(name, buf) {
+  try { await idb('parts', 'readwrite', s => s.put({name, base: baseOf(name), u8: buf, at: Date.now()})); }
+  catch (e) { say(`[CSV 用に保持できない（${e.message}）。.bin は保存済み]\n`); return false; }
+  stashed.add(baseOf(name));
+  return true;
+}
+
+/** 測位はメモリと localStorage の両方から。ページを開き直すとメモリは空になる */
+function gpsAll() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) {}
+  return KLCSV.fromPts(pts.concat(saved));
+}
+
+async function maybeCsv(base, force) {
+  if (csvBusy.has(base) || (!force && !lsFresh)) return;
+  const onBoard = Object.keys(seen).filter(n => baseOf(n) === base);
+  if (!force && onBoard.includes(activeLog)) return;                // 記録中
+  let mine;
+  try { mine = (await idb('parts', 'readonly', s => s.getAll())).filter(x => x.base === base); }
+  catch (e) { return; }
+  if (!mine.length) return;
+  const have = new Set(mine.map(x => x.name));
+  if (!force) {
+    if (onBoard.some(n => !have.has(n))) return;                   // まだ届いていないパートがある
+    if (await idb('done', 'readonly', s => s.get(base))) return;   // 払い出し済み
+  }
+  csvBusy.add(base);
+  try {
+    const idx = mine.map(x => +((/_(\d+)\.bin$/.exec(x.name) || [])[1] || 1));
+    const gaps = Math.max(...idx) - mine.length;
+    const r = KLCSV.build(mine.map(x => ({name: x.name, u8: x.u8})), gpsAll());
+    const how = r.base === null ? '時刻なし'
+      : r.baseFrom === 'speed' ? `車速で合わせた（誤差 ${r.align.mae.toFixed(1)}km/h）`
+      : r.baseFrom === 'anchor' ? 'アンカー' : 'ヘッダ時刻';
+    if (r.nRows >= 30) {
+      dl(base + '.csv', r.csv, 'text/csv');
+      say(`[CSV ${base}.csv  ${r.nRows} 行 / ${r.nParts} パート${gaps ? `（${gaps} パート欠け）` : ''}`
+        + ` / ${how} / 測位 ${r.matched} 行]\n`);
+    } else {
+      say(`[CSV ${base}: 0x11 が ${r.nRows} 行しか無いので出さない]\n`);
+    }
+    await idb('done', 'readwrite', s => s.put({base, at: Date.now(), gaps}));
+    await pruneStash();
+  } catch (e) {
+    say(`[CSV を作れない ${base}: ${e.message}]\n`);
+  } finally {
+    csvBusy.delete(base);
+    renderFiles();
+  }
+}
+
+/** 払い出し済みの走行の中身を消す。**直前の 1 走行だけは残す**（取り直し用） */
+async function pruneStash() {
+  const done = await idb('done', 'readonly', s => s.getAll());
+  if (!done.length) return;
+  const keep = done.reduce((a, b) => (a.at > b.at ? a : b)).base;
+  const doneSet = new Set(done.map(d => d.base));
+  const drop = (await idb('parts', 'readonly', s => s.getAllKeys()))
+    .filter(n => doneSet.has(baseOf(n)) && baseOf(n) !== keep);
+  if (drop.length) await idb('parts', 'readwrite', s => { drop.forEach(n => s.delete(n)); });
+  await refreshStashed();
+}
+
+/** `ls` の最終行（`N ファイル / M バイト  空き K KB`）。ここで一覧が最新になる */
+function lsEnd(line) {
+  if (!/^\d+ ファイル \/ \d+ バイト/.test(line)) return false;
+  lsFresh = true;
+  for (const b of stashed) maybeCsv(b);
+  return true;
+}
+
 /* `ls` の出力を拾う。`  name.bin   12345 バイト` */
 let seen = {}, sessAt = {};
+/** 今の接続で `ls` を最後まで読んだか。**古い一覧で「全パートそろった」と判断しない** */
+let lsFresh = false;
 function lsLine(line) {
   const m = line.match(/^\s+(\S+\.bin)\s+(\d+) バイト\s*$/);
   if (!m) return false;
@@ -743,6 +866,7 @@ function renderFiles() {
        + `<span class="tw" data-tw="${esc(b)}">▸</span>`
        + `<span class="nm">${esc(b)}　<span class="st">${sessAt[b] || ''}</span></span>`
        + `<span class="st">${parts.length} 本 / ${(size / 1024) | 0}KB ${st}</span>`
+       + (stashed.has(b) && !rec ? `<button data-csv="${esc(b)}">CSV</button>` : '')
        + `<button data-dl="${esc(b)}">DL</button></div>`
        + `<div class="parts" data-parts="${esc(b)}" hidden>`
        + parts.map(n => `<div><span class="nm">${esc(n)}</span>`
@@ -766,6 +890,8 @@ $('files').addEventListener('click', e => {
     for (const n of Object.keys(seen).filter(x => baseOf(x) === t.dataset.dl))
       if (n !== activeLog && !queue.includes(n)) queue.push(n);
     drain();
+  } else if (t.dataset.csv) {
+    maybeCsv(t.dataset.csv, true);          // 払い出し直し（端末への保存に失敗したとき）
   } else if (t.dataset.dl1) {
     if (t.dataset.dl1 !== activeLog && !queue.includes(t.dataset.dl1))
       queue.push(t.dataset.dl1);
@@ -839,7 +965,7 @@ function askDelete() {
  * 「DLしない」にしたぶん（`base`）はこの端末には無いので外す。記録中も当然外す。 */
 async function rmFiles(onlyGot, skipRefresh) {
   if (!skipRefresh) {
-    queue = []; seen = {};
+    queue = []; seen = {}; lsFresh = false;
     await send('rec');
     await send('ls');
     await new Promise(r => setTimeout(r, 1500));
@@ -849,7 +975,7 @@ async function rmFiles(onlyGot, skipRefresh) {
   say(`[${names.length} 本を消す]\n`);
   for (const n of names.sort()) { await send('rm ' + n); delete got[n]; }
   try { localStorage.setItem(LS_GOT, JSON.stringify(got)); } catch (e) {}
-  queue = []; seen = {}; sessAt = {};
+  queue = []; seen = {}; lsFresh = false; sessAt = {};
   await send('sess'); await send('ls');
 }
 
@@ -882,7 +1008,7 @@ async function finishRide() {
   $('bXfer').disabled = true;
   await stopRec();
   if (pts.length) { stopGps(); chip($('cGps'), false, 'GPS'); exportPts(pts); }
-  queue = []; seen = {};
+  queue = []; seen = {}; lsFresh = false;
   await send('rec');          // 記録中でないことを確認（activeLog を消す）
   await send('ls');
   setTimeout(() => { $('bXfer').disabled = false; drain(); }, 1500);
@@ -981,7 +1107,7 @@ $('bLog').onclick = () => {
 };
 $('bExport').onclick = () => exportPts(pts);
 $('bSnap').onclick = () => send('snap');
-$('bLs').onclick = async () => { queue = []; seen = {}; await send('rec'); await send('ls'); };
+$('bLs').onclick = async () => { queue = []; seen = {}; lsFresh = false; await send('rec'); await send('ls'); };
 $('cmd').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const v = e.target.value.trim();
@@ -1035,4 +1161,6 @@ document.addEventListener('visibilitychange', async () => {
     try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
   }
 });
+
+refreshStashed();        // 前回までに保持した走行（一覧の `CSV`）
 </script>
