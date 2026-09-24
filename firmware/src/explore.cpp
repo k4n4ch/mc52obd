@@ -41,6 +41,11 @@ static const char *RX_UUID  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  // Mac �
 static const char *TX_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";  // 基板 → Mac
 static BLECharacteristic *txChar = nullptr;
 static volatile bool bleConn = false;
+static const int CMDQ = 32;              // BLE コマンドのキュー（loop 付近で定義）
+/* `q` で見る。**返事が届かなくても、実行した数はここに残る。** 一気に送ったコマンドは
+ * 全部実行されるが、返事の一部が相手に届かないことがある（df 30 回で返事 19 回、
+ * 実行は 30 回）。混雑イベントで notify を待たせても変わらなかった。未解決 */
+static uint32_t qDropped = 0, qRun = 0;
 
 static void out(const char *s) {
   Serial.print(s);
@@ -1147,6 +1152,11 @@ static void runCmd(char *line) {
     if (ok) sessDropIfGone(sq);          // 最後のパートなら台帳からも落とす
     return;
   }
+  if (!strcmp(line, "q")) {          // 取りこぼしの切り分け用。返事が落ちても数は残る
+    outf("BLE コマンド 受けた %lu / 捨てた %lu（キュー %d）\n",
+         (unsigned long)qRun, (unsigned long)qDropped, CMDQ - 1);
+    return;
+  }
   if (!strcmp(line, "df")) {
     outf("容量 %u KB / 使用 %u KB / 空き %u KB\n",
          (unsigned)(LittleFS.totalBytes()/1024), (unsigned)(LittleFS.usedBytes()/1024),
@@ -1196,22 +1206,48 @@ static void runCmd(char *line) {
 }
 
 // ── 入力（BLE とシリアルで同じパーサを共有） ──────────────
-static char cmdBuf[128];
+static char cmdBuf[128];                 // シリアル（J3）の行バッファ。loop だけが触る
 static size_t cmdLen = 0;
-static volatile bool pending = false;
-static char pendingCmd[128];
+
+/* **BLE のコマンドはキューで受ける。** 以前は 1 つ分しか溜めず、loop が処理する前に
+ * 次が届くと上書きしていた。ページは 20ms 間隔で続けて送る（接続時の time → note →
+ * rec → sess → ls、「全部消す」の rm の列）ので、loop がポーリング（ECU 不在なら 1 周
+ * 約 0.85 秒）や `w` の打ち直し（約 2.5 秒）で塞がっている間に届いたものが全部消えた。
+ * 実測で df を 20 回送って返事は 1 回、「全部消す」で 1 本も消えなかった。
+ *
+ * onWrite は BLE のタスク、取り出しは loop のタスクなので、出し入れは排他する。 */
+static char cmdQ[CMDQ][128];
+static int qHead = 0, qTail = 0;         // head に積み、tail から取る
+static portMUX_TYPE qMux = portMUX_INITIALIZER_UNLOCKED;
+
+static void qPush(const char *s) {
+  portENTER_CRITICAL(&qMux);
+  int n = (qHead + 1) % CMDQ;
+  if (n == qTail) qDropped++;            // 満杯。捨てたことは loop が知らせる
+  else { strncpy(cmdQ[qHead], s, sizeof cmdQ[0] - 1); cmdQ[qHead][sizeof cmdQ[0] - 1] = 0; qHead = n; }
+  portEXIT_CRITICAL(&qMux);
+}
+static bool qPop(char *out) {
+  bool got = false;
+  portENTER_CRITICAL(&qMux);
+  if (qTail != qHead) { memcpy(out, cmdQ[qTail], sizeof cmdQ[0]); qTail = (qTail + 1) % CMDQ; got = true; }
+  portEXIT_CRITICAL(&qMux);
+  return got;
+}
 
 class RxCb : public BLECharacteristicCallbacks {
+  char buf[128];                         // BLE の行バッファ。シリアルとは分ける
+  size_t len = 0;
   void onWrite(BLECharacteristic *c) override {
     std::string v = c->getValue();
     for (char ch : v) {
       if (ch == '\n' || ch == '\r') {
-        if (cmdLen) { cmdBuf[cmdLen] = 0; strncpy(pendingCmd, cmdBuf, sizeof pendingCmd); pending = true; cmdLen = 0; }
-      } else if (cmdLen < sizeof cmdBuf - 1) cmdBuf[cmdLen++] = ch;
+        if (len) { buf[len] = 0; qPush(buf); len = 0; }
+      } else if (len < sizeof buf - 1) buf[len++] = ch;
     }
-    if (cmdLen && v.find('\n') == std::string::npos && v.find('\r') == std::string::npos) {
+    if (len && v.find('\n') == std::string::npos && v.find('\r') == std::string::npos) {
       // 改行なしで来た場合も 1 コマンドとして受ける（端末によっては付かない）
-      cmdBuf[cmdLen] = 0; strncpy(pendingCmd, cmdBuf, sizeof pendingCmd); pending = true; cmdLen = 0;
+      buf[len] = 0; qPush(buf); len = 0;
     }
   }
 };
@@ -1257,6 +1293,13 @@ void loop() {
       if (cmdLen) { cmdBuf[cmdLen] = 0; cmdLen = 0; runCmd(cmdBuf); out("\n"); }
     } else if (cmdLen < sizeof cmdBuf - 1) cmdBuf[cmdLen++] = ch;
   }
-  if (pending) { pending = false; runCmd(pendingCmd); out("\n"); }
+  char cmd[128];
+  while (qPop(cmd)) { qRun++; runCmd(cmd); out("\n"); }
+  static uint32_t droppedShown = 0;
+  if (qDropped != droppedShown) {
+    outf("**コマンドを %lu 件捨てた（キュー %d 件が満杯）**\n",
+         (unsigned long)(qDropped - droppedShown), CMDQ - 1);
+    droppedShown = qDropped;
+  }
   delay(2);
 }

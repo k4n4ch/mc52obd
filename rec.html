@@ -293,7 +293,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20260925a';
+const VERSION = 'v20260925b';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -968,7 +968,10 @@ async function rmFiles(onlyGot, skipRefresh) {
     queue = []; seen = {}; lsFresh = false;
     await send('rec');
     await send('ls');
-    await new Promise(r => setTimeout(r, 1500));
+    /* **一覧の最終行まで待つ。** 固定 1.5 秒では、基板のループがポーリングや `w` の
+     * 打ち直しで塞がっていると間に合わず、対象が空のまま「消せるものが無い」で終わる */
+    for (let i = 0; i < 100 && !lsFresh; i++) await new Promise(r => setTimeout(r, 100));
+    if (!lsFresh) { say('[一覧が返ってこない。消すのをやめた]\n'); return; }
   }
   const names = Object.keys(seen).filter(n => n !== activeLog && (!onlyGot || isGot(n)));
   if (!names.length) { say('[消せるものが無い]\n'); return; }
@@ -1137,6 +1140,13 @@ sel.onchange = () => {
 };
 showCorr();
 
+/* **削除ボタンは常に効かせる。** 以前は下の「前回の測位が残っていたら」の中で配線して
+ * いたので、測位が残っていない端末では押しても何も起きなかった。 */
+$('bRmGot').onclick = () => rmFiles(true);
+$('bRmAll').onclick = () => ask('全部消す',
+    '記録中を除く<b>すべて</b>を基板から消す。取り消せない。',
+    [['やめる', () => {}], ['消す', () => rmFiles(false), 'danger']]);
+
 // 前回のデータが残っていたら拾えるようにする（ページが落ちても失わない）
 try {
   const old = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
@@ -1144,11 +1154,7 @@ try {
     $('restore').hidden = $('restoreH').hidden = false;
     $('restoreInfo').textContent =
       old.length + ' 点 / ' + new Date(old[0].t).toLocaleString();
-    $('bRmGot').onclick = () => rmFiles(true);
-$('bRmAll').onclick = () => ask('全部消す',
-    '記録中を除く<b>すべて</b>を基板から消す。取り消せない。',
-    [['やめる', () => {}], ['消す', () => rmFiles(false), 'danger']]);
-$('bRestoreExp').onclick = () => exportPts(old);
+    $('bRestoreExp').onclick = () => exportPts(old);
     $('bRestoreDel').onclick = () => {
       localStorage.removeItem(LS_KEY); $('restore').hidden = $('restoreH').hidden = true;
     };
