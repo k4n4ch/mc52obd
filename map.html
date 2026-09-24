@@ -239,7 +239,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260908b';
+const VERSION = 'v20260925a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1722,6 +1722,12 @@ const HEAD_MAX_ROWS = 60;   // 探索の上限。停車中に延々と遡らな�
 const HEAD_SMOOTH = 2;      // 仕上げの移動平均の半幅（行）
 const HEAD_MED = 3;         // 中央値フィルタの半幅（行）
 const HEAD_DB = 2;          // 不感帯 [°]
+/* **止まっている行では方位を出さない。** 停車中の GPS は数 m の範囲で揺れるだけで、
+ * 前後 HEAD_M 離れた点が HEAD_MAX_ROWS 以内に見つからない。すると探索の端どうし
+ * （揺れた 2 点）を結んだ向きが方位になり、地図が回る（実測で停車 2,113 行のあいだに
+ * 累積 2,315°、1 行で最大 34°）。止まっているかは GPS でなく **OBD の車速**で決める ——
+ * 車速バイトは止まれば確実に 0 になる。 */
+const HEAD_STOP_KMH = 2;
 
 function computeHeadings() {
   /* 位置は `posAtT` から引く。`markerPos` は補完区間で 25m 間隔の頂点へ最近傍で
@@ -1731,6 +1737,7 @@ function computeHeadings() {
   for (let i = 0; i < rows.length; i++) {
     const c = pos[i];
     if (!c) continue;
+    if (rows[i].spd != null && rows[i].spd < HEAD_STOP_KMH) continue;   // 停車。前の値を引き継ぐ
     let a = null, b = null;
     for (let j = i - 1, k = 0; j >= 0 && k < HEAD_MAX_ROWS; j--, k++) {
       if (!pos[j]) continue;
