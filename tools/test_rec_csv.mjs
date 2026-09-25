@@ -14,6 +14,7 @@
  *   4. 払い出したら直前の 1 走行だけを残し、それより前は消す
  *   5. 基板が先に消したパートがある走行は、手元の分だけで作る
  *   6. 記録中の走行には手を出さない
+ *   7. ページを開き直しても、前に貯めた測位で位置を付ける（auto0024 で位置が抜けた件）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,7 +77,8 @@ try {
 
   const gpsOf = f => KLCSV.parseGpsCsv(fs.readFileSync(path.join(LOGS, f), 'utf8'));
   const setGps = async g => ev(`pts = ${JSON.stringify(g.map(p => ({t: Math.round(p.t * 1000), lat: p.lat,
-    lon: p.lon, alt: p.alt, spd: p.kmh == null ? null : p.kmh / 3.6, acc: p.acc})))}; 'ok'`);
+    lon: p.lon, alt: p.alt, spd: p.kmh == null ? null : p.kmh / 3.6, acc: p.acc})))};
+    gpsArchived = 0; 'ok'`);   // ページでは pts は増えるだけ。丸ごと差し替えるのはテストの都合
   const partsOf = pre => fs.readdirSync(LOGS).filter(f => f.startsWith(pre + '_') && f.endsWith('.bin')).sort();
   const u8 = f => new Uint8Array(fs.readFileSync(path.join(LOGS, f)));
 
@@ -156,6 +158,31 @@ try {
   await ev(`document.querySelector('[data-csv="auto0012"]').click(); 1`);
   await sleep(500);
   ok(await csvCount() === 5, 'ボタンで払い出し直せる');
+
+  // ── 7: 開き直しをまたぐ ─────────────────────────────────
+  console.log('auto0024（朝の測位を貯めた後にページを開き直す）');
+  const gAm = gpsOf('gps_2026-09-24T2316.csv'), gPm = gpsOf('gps_2026-09-25T0920.csv');
+  await setGps(gAm);
+  await ev(`archiveGps().then(() => idb('gps','readonly', s => s.count()))`);
+  const nArch = await ev(`idb('gps','readonly', s => s.count())`);
+  ok(nArch >= gAm.length, `朝の測位を IndexedDB に貯めた（${nArch} 点）`);
+  await cdp('Page.navigate', {url: `http://127.0.0.1:${HTTP}/rec.html`});
+  await sleep(1500);
+  for (let i = 0; i < 50 && !(await ev('typeof maybeCsv === "function"').catch(() => false)); i++) await sleep(200);
+  await ev(`window.__dl = []; window.__say = [];
+    dl = (name, text) => __dl.push({name, text}); dlBin = () => {};
+    const _say2 = say; say = t => { __say.push(t); _say2(t); };
+    baseDone = true; 'ok'`);
+  await setGps(gPm);                                   // 開き直した後は夕方の測位しか持っていない
+  await ev(`localStorage.setItem(LS_KEY, JSON.stringify(pts)); 1`);   // 控えも夕方で上書きされた状態
+  const p24 = partsOf('auto0024');
+  await ls(p24);
+  for (const n of p24) await transfer(n);
+  await sleep(500);
+  const d24 = await ev(`__dl.find(d => d.name === 'auto0024.csv')`);
+  const want24 = KLCSV.build(p24.map(n => ({name: n, u8: u8(n)})), gAm);
+  const nPos = d24 ? d24.text.trim().split('\n').slice(1).filter(l => l.split(',')[15] !== '').length : 0;
+  ok(d24 && nPos === want24.matched, `朝の位置が付いた（${nPos} 行、期待 ${want24.matched} 行）`);
 } catch (e) {
   fail++; console.log('  ✗ 例外: ' + e.message);
 } finally {

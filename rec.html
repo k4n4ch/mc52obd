@@ -293,7 +293,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20260925b';
+const VERSION = 'v20260925c';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -714,10 +714,12 @@ function dlBin(name, buf) {
 const IDB = (() => {
   let p = null;
   return () => p || (p = new Promise((res, rej) => {
-    const q = indexedDB.open('mc52-parts', 1);
+    const q = indexedDB.open('mc52-parts', 2);
     q.onupgradeneeded = () => {
-      q.result.createObjectStore('parts', {keyPath: 'name'});   // {name, base, u8, at}
-      q.result.createObjectStore('done', {keyPath: 'base'});    // {base, at, gaps}
+      const db = q.result, has = n => db.objectStoreNames.contains(n);
+      if (!has('parts')) db.createObjectStore('parts', {keyPath: 'name'});   // {name, base, u8, at}
+      if (!has('done')) db.createObjectStore('done', {keyPath: 'base'});     // {base, at, gaps}
+      if (!has('gps')) db.createObjectStore('gps', {keyPath: 't'});          // 測位点（v2 で追加）
     };
     q.onsuccess = () => res(q.result);
     q.onerror = () => rej(q.error);
@@ -747,11 +749,30 @@ async function stashPart(name, buf) {
   return true;
 }
 
-/** 測位はメモリと localStorage の両方から。ページを開き直すとメモリは空になる */
-function gpsAll() {
-  let saved = [];
+/* **CSV 用の測位は IndexedDB にも貯める。** メモリ（`pts`）はページを開き直すと空になり、
+ * localStorage の控えも新しい測位で上書きされる。パートは何回かの接続にまたがって届くので、
+ * 朝の走行の最後のパートが夕方に届くと、組み立てる時点で朝の測位がもう無かった
+ * （2026-09-25 の auto0024 が位置なしで出た）。**7 日ぶん**を残す（1 日 1 時間で 2〜3MB）。 */
+const GPS_KEEP_MS = 7 * 86400e3;
+let gpsArchived = 0;                     // pts のうち IndexedDB へ書いた数
+async function archiveGps() {
+  const add = pts.slice(gpsArchived);
+  if (!add.length) return;
+  try {
+    await idb('gps', 'readwrite', s => { add.forEach(p => s.put(p)); });
+    gpsArchived += add.length;
+  } catch (e) { /* 書けなくても走行は続ける。CSV の位置が欠けるだけ */ }
+}
+async function pruneGps() {
+  try { await idb('gps', 'readwrite', s => s.delete(IDBKeyRange.upperBound(Date.now() - GPS_KEEP_MS))); }
+  catch (e) {}
+}
+/** 測位はメモリ・localStorage・IndexedDB の 3 つを合わせる（重複は klcsv.js が落とす） */
+async function gpsAll() {
+  let saved = [], arch = [];
   try { saved = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) {}
-  return KLCSV.fromPts(pts.concat(saved));
+  try { arch = await idb('gps', 'readonly', s => s.getAll()); } catch (e) {}
+  return KLCSV.fromPts(pts.concat(saved, arch));
 }
 
 async function maybeCsv(base, force) {
@@ -771,7 +792,8 @@ async function maybeCsv(base, force) {
   try {
     const idx = mine.map(x => +((/_(\d+)\.bin$/.exec(x.name) || [])[1] || 1));
     const gaps = Math.max(...idx) - mine.length;
-    const r = KLCSV.build(mine.map(x => ({name: x.name, u8: x.u8})), gpsAll());
+    await archiveGps();                  // 直前の測位も入れてから組み立てる
+    const r = KLCSV.build(mine.map(x => ({name: x.name, u8: x.u8})), await gpsAll());
     const how = r.base === null ? '時刻なし'
       : r.baseFrom === 'speed' ? `車速で合わせた（誤差 ${r.align.mae.toFixed(1)}km/h）`
       : r.baseFrom === 'anchor' ? 'アンカー' : 'ヘッダ時刻';
@@ -1011,6 +1033,7 @@ async function finishRide() {
   $('bXfer').disabled = true;
   await stopRec();
   if (pts.length) { stopGps(); chip($('cGps'), false, 'GPS'); exportPts(pts); }
+  await archiveGps();         // 10 秒待たずに書く。この後すぐ CSV を組み立てる
   queue = []; seen = {}; lsFresh = false;
   await send('rec');          // 記録中でないことを確認（activeLog を消す）
   await send('ls');
@@ -1069,6 +1092,7 @@ function save() {
   if (Date.now() - saveAt < 10000) return;           // **10 秒ごとに保険をかける**
   saveAt = Date.now();
   try { localStorage.setItem(LS_KEY, JSON.stringify(pts)); } catch (e) { /* 満杯でも走行は続ける */ }
+  archiveGps();
 }
 
 function dl(name, text, type) {
@@ -1169,4 +1193,5 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 refreshStashed();        // 前回までに保持した走行（一覧の `CSV`）
+pruneGps();              // 7 日より古い測位を消す
 </script>
