@@ -293,7 +293,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20260925c';
+const VERSION = 'v20260925d';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -360,11 +360,12 @@ async function connect() {
     $('bRmGot').disabled = $('bRmAll').disabled = false;
     // **接続したら壁時計を入れる。** 基板に RTC が無いので、これをやらないと
     // 記録した時刻を測位ログと突き合わせられない
-    const epoch = Math.floor(Date.now() / 1000);
-    await send('time ' + epoch);
+    // **ミリ秒まで、送る瞬間の時刻を送る。** 基板は受け取ってから実行するまでの待ちを足す
+    const now = () => (Date.now() / 1000).toFixed(3);
+    await send('time ' + now());
     // **自動記録だとファイル先頭の時刻が未設定のまま開いている。**
     // ログの途中に絶対時刻の基準点を 1 個打てば、dt の積算から前後どちらにも戻せる
-    await send('note t=' + epoch);
+    await send('note t=' + now());
     await send('rec');                 // 記録中のファイル名を知る（転送から除く）
     await new Promise(r => setTimeout(r, 400));
     queue = []; seen = {}; lsFresh = false; sessAt = {};
@@ -795,6 +796,7 @@ async function maybeCsv(base, force) {
     await archiveGps();                  // 直前の測位も入れてから組み立てる
     const r = KLCSV.build(mine.map(x => ({name: x.name, u8: x.u8})), await gpsAll());
     const how = r.base === null ? '時刻なし'
+      : r.corrected ? `${r.corrected.from === 'anchor' ? 'アンカー' : 'ヘッダ時刻'}を車速で ${r.corrected.by.toFixed(1)} 秒補正`
       : r.baseFrom === 'speed' ? `車速で合わせた（誤差 ${r.align.mae.toFixed(1)}km/h）`
       : r.baseFrom === 'anchor' ? 'アンカー' : 'ヘッダ時刻';
     if (r.nRows >= 30) {

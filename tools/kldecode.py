@@ -27,7 +27,7 @@ T_NAME = {0x01: "独自層", 0x02: "標準層", 0x03: "要求", 0x10: "メモ"}
 # **壁時計のアンカー。** 自動記録では基板に RTC が無く、起動時の時刻が未設定のまま
 # ファイルが開く。スマホが接続した時点で `note t=<epoch>` を打っておけば、ログの途中に
 # 絶対時刻の基準点が 1 個入る。レコードの dt は先頭から積算なので前後どちらにも戻せる。
-ANCHOR = re.compile(r"^t=(\d{10})$")
+ANCHOR = re.compile(r"^t=(\d{10}(?:\.\d+)?)$")   # 小数（ミリ秒）付きも受ける
 
 
 def wallclock_anchor(path):
@@ -37,7 +37,7 @@ def wallclock_anchor(path):
             continue
         m = ANCHOR.match(p.decode("utf-8", "replace").strip())
         if m:
-            return ms, int(m.group(1))
+            return ms, float(m.group(1))
     return None
 
 

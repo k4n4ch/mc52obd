@@ -53,7 +53,8 @@ for (const [b, parts] of sess) {
   fs.writeFileSync(path.join(out, b + '.csv'), r.csv);
   const t = r.base === null ? '時刻なし'
     : `${new Date(r.base * 1000).toISOString().slice(0, 19)}Z（${r.baseFrom}`
-      + (r.align && r.align.ok ? ` 誤差 ${r.align.mae.toFixed(2)} / 次点 ${r.align.second.toFixed(1)}km/h` : '') + '）';
+      + (r.corrected ? ` ${r.corrected.from} を ${r.corrected.by >= 0 ? '+' : ''}${r.corrected.by.toFixed(1)} 秒補正` : '')
+      + (r.baseFrom === 'speed' && r.align ? ` 誤差 ${r.align.mae.toFixed(2)} / 次点 ${r.align.second.toFixed(1)}km/h` : '') + '）';
   const why = r.base === null && r.align ? `  ※ 合わせられない（誤差 ${r.align.mae.toFixed(2)} / 次点 ${r.align.second.toFixed(1)}）` : '';
   console.log(`  ${b.padEnd(14)} ${String(r.nRows).padStart(5)} 行 ${(r.span / 60).toFixed(1).padStart(5)} 分 `
     + `${r.nParts} パート  ${t}  測位 ${r.matched}/${r.nRows}${r.truncated ? '  末尾切れ' : ''}${why}`);

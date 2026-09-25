@@ -41,7 +41,8 @@ function compare(name, prefix, gpsFile) {
   execFileSync('python3', [path.join(ROOT, 'tools', 'klcsv.py'), ...bins, '-o', pyOut,
                            ...(gp ? ['--gps', gp] : [])], {stdio: 'pipe'});
   const gps = gp ? KLCSV.parseGpsCsv(fs.readFileSync(gp, 'utf8')) : null;
-  const js = KLCSV.build(bins.map(f => ({name: path.basename(f), u8: new Uint8Array(fs.readFileSync(f))})), gps);
+  // klcsv.py は検算しないので、比べるときは切る（検算は下で別に確かめる）
+  const js = KLCSV.build(bins.map(f => ({name: path.basename(f), u8: new Uint8Array(fs.readFileSync(f))})), gps, {verify: false});
   const P = table(fs.readFileSync(pyOut, 'utf8')), J = table(js.csv);
   console.log(`- ${name}: ${J.r.length} 行（基準 ${js.baseFrom}）`);
   ok(P.h.join() === J.h.join(), `列が違う\n    py ${P.h}\n    js ${J.h}`);
@@ -82,6 +83,20 @@ compare('09-19 自動記録（アンカーあり・測位なし）', 'auto0002',
     console.log(`- 朝のログに夕方の測位だけを渡す: 基準 ${js2.baseFrom ?? 'なし'}`);
     ok(js2.base === null, '別の走行の測位に誤って合わせた');
   }
+}
+
+// 基準の時刻の検算。ずれていたものだけ直し、合っていたものには触らない
+for (const [pre, gf, want] of [['auto0024', 'gps_2026-09-24T2316.csv', 10.2], ['r260919_1224', 'gps_2026-09-19T0324.csv', 2.3],
+                               ['r260919_1150', 'gps_2026-09-19T0250.csv', null], ['auto0016', 'gps_2026-09-24T1042.csv', null]]) {
+  const bins = parts(pre), gp = path.join(LOGS, gf);
+  if (!bins.length || !fs.existsSync(gp)) continue;
+  ran++;
+  const r = KLCSV.build(bins.map(f => ({name: path.basename(f), u8: new Uint8Array(fs.readFileSync(f))})),
+                        KLCSV.parseGpsCsv(fs.readFileSync(gp, 'utf8')));
+  const by = r.corrected ? r.corrected.by : null;
+  console.log(`- 検算 ${pre}: ${by === null ? '補正なし' : `${r.corrected.from} を ${by.toFixed(2)} 秒補正`}`);
+  ok(want === null ? by === null : by !== null && Math.abs(by - want) < 0.3,
+     want === null ? '合っている時刻を動かした' : `補正量が ${want} 秒から外れた`);
 }
 
 console.log(fail ? `\n失敗 ${fail} 件` : `\n${ran} ケースすべて一致`);

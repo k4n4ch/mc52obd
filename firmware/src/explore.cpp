@@ -46,6 +46,11 @@ static const int CMDQ = 32;              // BLE コマンドのキュー（loop 
  * 全部実行されるが、返事の一部が相手に届かないことがある（df 30 回で返事 19 回、
  * 実行は 30 回）。混雑イベントで notify を待たせても変わらなかった。未解決 */
 static uint32_t qDropped = 0, qRun = 0;
+/* **キューで待たされた時間。** `time` と `note t=` は送った瞬間の時刻を運ぶので、実行時に
+ * これを足さないと時計が待たされた分だけ遅れる。起動直後は ECU を起こす処理で loop が
+ * 10 秒ほど塞がることがあり、09-25 の auto0024 は時計が 10.2 秒遅れた（車速と GPS の
+ * 相関で判明）。シリアルから来たものは 0。 */
+static uint32_t cmdAgeMs = 0;
 
 static void out(const char *s) {
   Serial.print(s);
@@ -1162,7 +1167,16 @@ static void runCmd(char *line) {
          (unsigned)(LittleFS.totalBytes()/1024), (unsigned)(LittleFS.usedBytes()/1024),
          (unsigned)((LittleFS.totalBytes()-LittleFS.usedBytes())/1024)); return;
   }
-  if (!strcmp(line, "note")) { logRec(T_NOTE, (const uint8_t*)arg, strlen(arg)); out("記録した\n"); return; }
+  if (!strcmp(line, "note")) {
+    /* **`t=<epoch>` のアンカーは待たされた時間を足して書く。** 値は送った瞬間の時刻で、
+     * ログに入るのは実行した瞬間なので、そのままだと待ちの分だけ食い違う */
+    char buf[48];
+    if (!strncmp(arg, "t=", 2) && cmdAgeMs) {
+      snprintf(buf, sizeof buf, "t=%.3f", strtod(arg + 2, nullptr) + cmdAgeMs / 1000.0);
+      arg = buf;
+    }
+    logRec(T_NOTE, (const uint8_t*)arg, strlen(arg)); out("記録した\n"); return;
+  }
   if (!strcmp(line, "wifi")) { cmdWifi(arg); return; }
   if (!strcmp(line, "ota")) { cmdOta(arg); return; }
   if (!strcmp(line, "t")) { uint8_t t[1]; if (hexBytes(arg, t, 1) == 1) cmdTable(t[0]); else out("t の後に 16 進 2 桁\n"); return; }
@@ -1173,9 +1187,12 @@ static void runCmd(char *line) {
     klBreak(ms, 120); outf("%lu ms の Low を出した\n", (unsigned long)ms); return;
   }
   if (!strcmp(line, "time")) {
-    time_t t = (time_t)atoll(arg);
-    struct timeval tv = {t, 0}; settimeofday(&tv, nullptr);
-    outf("壁時計を %s に合わせた", ctime(&t));
+    /* 小数の秒も受ける（ページはミリ秒まで送る）。待たされた時間を足す */
+    double e = strtod(arg, nullptr) + cmdAgeMs / 1000.0;
+    time_t t = (time_t)e;
+    struct timeval tv = {t, (suseconds_t)((e - (double)t) * 1e6)}; settimeofday(&tv, nullptr);
+    char tb[24]; strftime(tb, sizeof tb, "%Y-%m-%d %H:%M:%S", gmtime(&t));
+    outf("壁時計を %s UTC に合わせた（待ち %lu ms を補正）\n", tb, (unsigned long)cmdAgeMs);
     /* **起動後の最初の 1 回だけ台帳へ書く。** ここで millis() も分かるので、
      * セッションの開始時刻が正確に出る。 */
     if (curSeq >= 0 && !sessWritten && t > 1700000000) {
@@ -1217,6 +1234,7 @@ static size_t cmdLen = 0;
  *
  * onWrite は BLE のタスク、取り出しは loop のタスクなので、出し入れは排他する。 */
 static char cmdQ[CMDQ][128];
+static uint32_t cmdAt[CMDQ];             // 受け取った millis()。待たされた時間を出す
 static int qHead = 0, qTail = 0;         // head に積み、tail から取る
 static portMUX_TYPE qMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -1224,13 +1242,15 @@ static void qPush(const char *s) {
   portENTER_CRITICAL(&qMux);
   int n = (qHead + 1) % CMDQ;
   if (n == qTail) qDropped++;            // 満杯。捨てたことは loop が知らせる
-  else { strncpy(cmdQ[qHead], s, sizeof cmdQ[0] - 1); cmdQ[qHead][sizeof cmdQ[0] - 1] = 0; qHead = n; }
+  else { strncpy(cmdQ[qHead], s, sizeof cmdQ[0] - 1); cmdQ[qHead][sizeof cmdQ[0] - 1] = 0;
+         cmdAt[qHead] = millis(); qHead = n; }
   portEXIT_CRITICAL(&qMux);
 }
-static bool qPop(char *out) {
+static bool qPop(char *out, uint32_t *at) {
   bool got = false;
   portENTER_CRITICAL(&qMux);
-  if (qTail != qHead) { memcpy(out, cmdQ[qTail], sizeof cmdQ[0]); qTail = (qTail + 1) % CMDQ; got = true; }
+  if (qTail != qHead) { memcpy(out, cmdQ[qTail], sizeof cmdQ[0]); *at = cmdAt[qTail];
+                        qTail = (qTail + 1) % CMDQ; got = true; }
   portEXIT_CRITICAL(&qMux);
   return got;
 }
@@ -1294,7 +1314,8 @@ void loop() {
     } else if (cmdLen < sizeof cmdBuf - 1) cmdBuf[cmdLen++] = ch;
   }
   char cmd[128];
-  while (qPop(cmd)) { qRun++; runCmd(cmd); out("\n"); }
+  uint32_t at;
+  while (qPop(cmd, &at)) { qRun++; cmdAgeMs = millis() - at; runCmd(cmd); cmdAgeMs = 0; out("\n"); }
   static uint32_t droppedShown = 0;
   if (qDropped != droppedShown) {
     outf("**コマンドを %lu 件捨てた（キュー %d 件が満杯）**\n",

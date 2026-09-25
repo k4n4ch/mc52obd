@@ -40,7 +40,7 @@
       i += ln; ms += dt;
       recs.push({ms, typ, p});
       if (typ === T_NOTE && anchor === null) {
-        const m = /^t=(\d{10})$/.exec(td.decode(p).trim());
+        const m = /^t=(\d{10}(?:\.\d+)?)$/.exec(td.decode(p).trim());   // 小数（ミリ秒）付きも受ける
         if (m) anchor = {ms, epoch: +m[1]};
       }
     }
@@ -115,7 +115,7 @@
    *  auto0014 で確かめた手順: 最良点の平均誤差 0.50km/h に対し、±10 秒の外の次点は
    *  13.2km/h。止まっている区間はどこにでも一致するので、動いている行だけを使う。
    *  1 秒刻みで全域を探し、最良点の周りを 0.1 秒刻みで詰める。 */
-  function alignBySpeed(rows, g) {
+  function alignBySpeed(rows, g, win) {
     const mov = rows.filter(r => r.spd >= 5);
     if (mov.length < 60 || g.length < 60) return null;
     const step = Math.max(1, Math.floor(mov.length / 400));
@@ -144,8 +144,11 @@
       }
       return c >= S.length * 0.8 ? s / c : Infinity;
     };
+    // 探す範囲。基準の時刻があるときはその前後 win.half 秒だけ（検算。全域を探すと重い）
+    let lo = 0, hi = n - span - 1;
+    if (win) { lo = Math.max(lo, Math.floor(win.t0 - win.half - g0)); hi = Math.min(hi, Math.ceil(win.t0 + win.half - g0)); }
     const coarse = [];
-    for (let off = 0; off + span < n; off++) coarse.push([cost(off), off]);
+    for (let off = lo; off <= hi; off++) coarse.push([cost(off), off]);
     if (!coarse.length) return null;
     coarse.sort((a, b) => a[0] - b[0]);
     const best = coarse[0];
@@ -165,15 +168,28 @@
   const r2 = (x, d) => { const k = Math.pow(10, d); return Math.round(x * k) / k; };
   function iso(epochSec) { return new Date(Math.round(epochSec * 1000)).toISOString(); }
 
-  /** parts: [{name, u8}]、gps: 測位（任意）。CSV の文字列と要約を返す。 */
-  function build(parts, gps) {
+  /** **基準の時刻（ヘッダ・アンカー）は GPS で検算する。** 基板は `time` と `note t=` を
+   *  キューで待たせてから実行するので、2026-09-25 の修正より前のファームでは待たされた分
+   *  ずれている（auto0024 でヘッダが 10.2 秒、r260919_1224 で 2.3 秒）。アンカーの正常な
+   *  ずれは 0.1〜0.9 秒（秒の切り捨てと測位の遅れ）なので、それを超えるものだけ直す。 */
+  const VERIFY_S = 1.5, VERIFY_WIN = 120;
+
+  /** parts: [{name, u8}]、gps: 測位（任意）、opts.verify=false で検算しない（klcsv.py との比較用）。
+   *  CSV の文字列と要約を返す。 */
+  function build(parts, gps, opts) {
     const m = mergeParts(parts);
     const rows = toRows(m.recs);
     const g = normGps(gps);
-    let base = m.base, baseFrom = m.baseFrom, align = null;
-    if (base === null && g.length) {
+    let base = m.base, baseFrom = m.baseFrom, align = null, corrected = null;
+    if (g.length && base === null) {
       align = alignBySpeed(rows, g);
       if (align && align.ok) { base = align.base; baseFrom = 'speed'; }
+    } else if (g.length && !(opts && opts.verify === false)) {
+      align = alignBySpeed(rows, g, {t0: base, half: VERIFY_WIN});
+      if (align && align.ok && Math.abs(align.base - base) > VERIFY_S) {
+        corrected = {from: baseFrom, by: align.base - base};
+        base = align.base; baseFrom = 'speed';
+      }
     }
     const withGps = g.length > 0;
     const cols = COLS.concat(withGps ? GPS_COLS : []);
@@ -193,7 +209,7 @@
     }
     const span = m.recs.length ? m.recs[m.recs.length - 1].ms / 1000 : 0;
     return {csv: out.join('\n') + '\n', nRows: rows.length, nParts: m.nParts,
-            truncated: m.truncated, base, baseFrom, align, matched, span};
+            truncated: m.truncated, base, baseFrom, align, corrected, matched, span};
   }
 
   /** 測位 CSV（rec.html の書き出し形式）を build() が受ける形にする。 */
