@@ -85,7 +85,36 @@ button:disabled{opacity:.35}
 #map, #omap{flex:1 1 0; min-height:0; min-width:0; background:#1a1a19;
   position:relative; overflow:hidden}
 #mapc, #omapc{position:absolute; inset:0}
-#map.off, #omap.off, #side.off{display:none}
+#map.off, #omap.off, #side.off, #lgr.off{display:none}
+/* ── ロガー（rec.html の走行画面と同じ並び）──────────────
+ * ナビと並べると、運転中の画面（左に地図アプリ、右にロガー）と同じ見え方になる。
+ * 文字の大きさはペインの寸法で決める（画面全体ではなく）。ペインが横長なら
+ * rec.html の横向きと同じく 3 段を横 3 列に組み替える。 */
+#lgr{flex:1 1 0; min-width:0; min-height:0; background:var(--bg); container-type:size;
+  display:flex; flex-direction:column}
+#lgr .lg{flex:1 1 auto; display:grid; grid-template-rows:1fr 1fr 1fr auto;
+  gap:.4rem; padding:.4rem; min-height:0}
+#lgr .row{background:var(--panel); border:1px solid var(--line); border-radius:.5rem;
+  position:relative; display:flex; align-items:center; justify-content:center;
+  min-height:0; overflow:hidden}
+#lgr .row .lbl{position:absolute; top:.32rem; left:.6rem; font-size:.66rem; color:var(--dim); letter-spacing:.14em}
+#lgr .row .sub{position:absolute; bottom:.3rem; right:.6rem; font-size:.68rem; color:var(--dim)}
+#lgr .val{font-weight:700; line-height:.9; letter-spacing:-.02em; font-size:min(36cqw,20cqh)}
+#lgr .bar{position:absolute; left:.5rem; right:.5rem; bottom:.4rem; height:.5rem;
+  background:#0c1016; border:1px solid var(--line); border-radius:999px; overflow:hidden}
+#lgr .fill{height:100%; width:0%;
+  background:linear-gradient(90deg,#2a6fb8,#4da3ff 60%,#ffb020 82%,#ff4d5e 95%)}
+#lgr .sec{display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem}
+#lgr .cell{background:var(--panel); border:1px solid var(--line); border-radius:.4rem;
+  padding:.32rem .2rem; text-align:center}
+#lgr .cell .lbl{font-size:.6rem; color:var(--dim); letter-spacing:.1em}
+#lgr .cell .val{font-size:clamp(1rem,5.4cqw,1.6rem); font-weight:600; line-height:1.15}
+#lgr .cell.warn .val{color:var(--warn)} #lgr .cell.bad .val{color:var(--bad)}
+@container (min-aspect-ratio:1/1){
+  #lgr .lg{grid-template-rows:1fr auto; grid-template-columns:repeat(3,1fr)}
+  #lgr .sec{grid-column:1 / -1}
+  #lgr .val{font-size:min(13cqw,26cqh)}
+}
 #pView{display:flex; gap:.3rem; margin-left:auto}
 .brk{flex:1 0 100%; height:0}        /* ここで必ず折り返す */
 /* 残り幅を全部取り、時間表示を右に残す。進捗は --p（0〜100%）で塗る */
@@ -204,6 +233,7 @@ button:disabled{opacity:.35}
   <!-- 表示するペインの選択。3 つのうち最後に触った 2 つを出す -->
   <div id="pView">
     <button id="pNav" disabled title="進行方向を上にして自車を中心に固定する。回転数・車速・ギヤを重ねて表示">ナビ</button>
+    <button id="pLog" disabled title="走行中のロガー画面（rec.html）と同じ表示。ナビと並べると運転中の画面分割と同じ見え方になる">ロガー</button>
     <button id="pFit" title="経路全体を映す地図">全景</button>
     <button id="pChart" title="車速・ギヤ・回転数などの時系列">グラフ</button>
   </div>
@@ -229,6 +259,22 @@ button:disabled{opacity:.35}
       <button id="nvOff" title="ナビモードを抜ける">✕</button>
     </div>
   </div>
+  <div id="lgr" class="off">
+    <div class="lg">
+      <div class="row"><div class="lbl">RPM</div><div class="val" id="lgRpm">----</div>
+        <div class="bar"><div class="fill" id="lgRpmF"></div></div></div>
+      <div class="row"><div class="lbl">km/h</div><div class="val" id="lgSpd">--</div>
+        <div class="sub" id="lgGps">GPS --</div></div>
+      <div class="row"><div class="lbl">GEAR</div><div class="val" id="lgGear">?</div>
+        <div class="sub" id="lgDrv">--</div></div>
+      <div class="sec">
+        <div class="cell"><div class="lbl">THR %</div><div class="val" id="lgThr">--</div></div>
+        <div class="cell"><div class="lbl">INJ</div><div class="val" id="lgInj">--</div></div>
+        <div class="cell" id="lgEctC"><div class="lbl">ECT °C</div><div class="val" id="lgEct">--</div></div>
+        <div class="cell" id="lgVoltC"><div class="lbl">VOLT</div><div class="val" id="lgVolt">--</div></div>
+      </div>
+    </div>
+  </div>
   <div id="omap">
     <div id="omapc"></div>
     <div id="empty">アプリが書き出した CSV を読み込むと、<br>経路と時系列を表示する</div>
@@ -239,7 +285,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260925a';
+const VERSION = 'v20260925b';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -1828,17 +1874,43 @@ function navApply(i, force) {
   }
 }
 
-/* ── ペイン（ナビ / 全景 / グラフ）──────────────────────
+/* ── ロガー ─────────────────────────────────────────
+ * 再生位置の行を、rec.html の走行画面と同じ並びで出す。値の出どころはナビのゲージと
+ * 同じ（車速は補正後の `spdTrue`、ギヤは判定できないときの記号も同じ規則）。
+ * CSV に無い列（ELM327 の記録の噴射・駆動状態）は `--`。 */
+const DRIVE_TXT = {0: '駆動', 1: 'N / クラッチ', 3: 'スタンド'};
+function drawLogger(r) {
+  if (!paneOn('log') || !r) return;
+  const set = (id, v) => { $(id).textContent = v; };
+  const n = (v, d = 0) => v == null || isNaN(v) ? '--' : (+v).toFixed(d);
+  set('lgRpm', r.rpm == null ? '----' : Math.round(r.rpm));
+  $('lgRpmF').style.width = Math.max(0, Math.min(100, (r.rpm || 0) / 105)) + '%';   // 10,500rpm で満
+  set('lgSpd', n(r.spdTrue));
+  set('lgGps', 'GPS ' + n(r.gspd));
+  set('lgGear', r.gear ? String(r.gear) : r.gstate === 'slow' ? '–' : r.gstate === 'shift' ? '⇅' : '?');
+  set('lgDrv', r.drive == null || isNaN(r.drive) ? '--' : (DRIVE_TXT[r.drive] || '?'));
+  set('lgThr', n(r.thr, 1));
+  set('lgInj', r.inj == null || isNaN(r.inj) ? '--' : r.inj === 0 ? 'CUT' : Math.round(r.inj));
+  set('lgEct', n(r.ect));
+  set('lgVolt', n(r.volt, 1));
+  // 水温と電圧だけ色を変える（rec.html と同じ閾値）
+  $('lgEctC').className = 'cell' + (r.ect > 105 ? ' bad' : r.ect > 98 ? ' warn' : '');
+  $('lgVoltC').className = 'cell' + (r.volt != null && (r.volt < 12.0 || r.volt > 15.0)
+      ? ' bad' : r.volt != null && r.volt < 12.8 ? ' warn' : '');
+}
+
+/* ── ペイン（ナビ / ロガー / 全景 / グラフ）──────────────
  *
- * 3 つのうち**最後に触った 2 つ**を出す。並びは触った順ではなく
- * **ナビ → 全景 → グラフ の固定順**。押すたびに上下が入れ替わると、見ていた
+ * 4 つのうち**最後に触った 2 つ**を出す。並びは触った順ではなく
+ * **ナビ → ロガー → 全景 → グラフ の固定順**（ナビとロガーで、運転中の画面分割と
+ * 同じ左右になる）。押すたびに上下が入れ替わると、見ていた
  * 場所が動いて追えなくなる。
  *
  * 押したものをもう一度押すと外れ、1 つだけになれば全面になる。0 個は作らない。
  */
-const PANE_ORDER = ['nav', 'fit', 'chart'];
-const PANE_EL  = {nav:'map', fit:'omap', chart:'side'};
-const PANE_BTN = {nav:'pNav', fit:'pFit', chart:'pChart'};
+const PANE_ORDER = ['nav', 'log', 'fit', 'chart'];
+const PANE_EL  = {nav:'map', log:'lgr', fit:'omap', chart:'side'};
+const PANE_BTN = {nav:'pNav', log:'pLog', fit:'pFit', chart:'pChart'};
 const PANE_KEY = 'mc52_panes';
 let shown = ['fit', 'chart'];        // 後ろほど新しく触ったもの
 
@@ -1867,6 +1939,7 @@ function applyPanes() {
   // 地図は表示されている面だけを作る。drawMap の中で必要な面が用意される
   if (rows.length) drawMap();
   setNav(vis.includes('nav'));
+  if (vis.includes('log') && cursor >= 0) drawLogger(rows[cursor]);
   /* 寸法が変わったので両面とも取り直す。1 回では拾えないことがあるため、
    * レイアウトが確定したあとにもう一度当てる（setNav と同じ理由）。 */
   const settle = () => {
@@ -2279,6 +2352,7 @@ function setCursor(i) {
   if (marker) { if (mp) marker.setLatLng(mp.ll); marker.setStyle({opacity:0, fillOpacity:0}); }
   if (omarker && mp) omarker.setLatLng(mp.ll);
   navApply(i, false);
+  drawLogger(r);
   drawCharts();
 }
 
@@ -2376,6 +2450,7 @@ $('file').onchange = async e => {
       $('estsp').disabled = false;
       $('calsp').disabled = false;
       $('pNav').disabled = false;
+      $('pLog').disabled = false;
       for (const id of ['pPlay', 'pBack', 'pFwd']) $(id).disabled = false;
       playT = rows[0].t; setPlay(false);
       showKDiag();
@@ -2484,6 +2559,7 @@ function calibrateSpeed() {
 $('calsp').onclick = calibrateSpeed;
 
 $('pNav').onclick   = () => togglePane('nav');
+$('pLog').onclick   = () => togglePane('log');
 $('pFit').onclick   = () => togglePane('fit');
 $('pChart').onclick = () => togglePane('chart');
 $('nvOff').onclick  = () => togglePane('nav');
