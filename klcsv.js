@@ -54,10 +54,24 @@
     const sorted = parts.slice().sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     const out = [];
     let base = null, baseFrom = null, off = 0, truncated = 0;
+    /* **欠番を詰めない。** パートが 1 本抜けたまま連結すると、それ以降の時刻が抜けた分
+     * （1 本 約 7.4 分）だけ前へずれる（auto0048 で実際に起きた）。抜けを見つけたら、
+     * 直前のヘッダ時刻が分かっているパートからの差で次のパートの開始を置き直す。
+     * ヘッダの壁時計は最大 5 秒遅れるので、その分は誤差として残る。 */
+    const missing = [];
+    let prevNo = null, ref = null;         // ref: ヘッダ時刻が分かっている直近のパート {hdr, off}
     sorted.forEach((pt, k) => {
       const b = parseBin(pt.u8);
+      const mNo = /_(\d+)\.bin$/.exec(pt.name);
+      const no = mNo ? +mNo[1] : null;
+      if (no !== null && prevNo !== null && no > prevNo + 1) {
+        for (let i = prevNo + 1; i < no; i++) missing.push(i);
+        if (ref && b.hdr >= 1700000000) off = Math.max(off, ref.off + (b.hdr - ref.hdr) * 1000);
+      }
+      if (no !== null) prevNo = no;
       if (!b.recs.length) return;
       if (b.truncated) truncated++;
+      if (b.hdr >= 1700000000) ref = {hdr: b.hdr, off};
       if (k === 0 && b.hdr >= 1700000000) { base = b.hdr; baseFrom = 'header'; }
       for (const r of b.recs) out.push({ms: off + r.ms, typ: r.typ, p: r.p});
       if (b.anchor && base === null) {
@@ -65,7 +79,7 @@
       }
       off += b.lastMs;
     });
-    return {recs: out, base, baseFrom, truncated, nParts: sorted.length};
+    return {recs: out, base, baseFrom, truncated, nParts: sorted.length, missing};
   }
 
   /** `0x11` 1 フレームを 1 行にし、直前の `0xD1` の駆動状態を添える。 */
@@ -209,7 +223,7 @@
     }
     const span = m.recs.length ? m.recs[m.recs.length - 1].ms / 1000 : 0;
     return {csv: out.join('\n') + '\n', nRows: rows.length, nParts: m.nParts,
-            truncated: m.truncated, base, baseFrom, align, corrected, matched, span};
+            truncated: m.truncated, missing: m.missing, base, baseFrom, align, corrected, matched, span};
   }
 
   /** 測位 CSV（rec.html の書き出し形式）を build() が受ける形にする。 */

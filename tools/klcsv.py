@@ -29,6 +29,7 @@ import bisect
 import csv
 import datetime as dt
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -41,14 +42,32 @@ COLS = ["t_sec", "iso_time", "0C_rpm", "0D_speed", "11_tps", "45_tps_rel",
 GPS_COLS = ["lat", "lon", "speed_gps", "gps_acc", "alt"]
 
 
-def merge_parts(paths):
-    """パートを名前順に連結し、(通算ms, type, payload) の列と時刻の基準を返す。"""
+def merge_parts(paths, missing=None):
+    """パートを名前順に連結し、(通算ms, type, payload) の列と時刻の基準を返す。
+
+    **欠番を詰めない。** パートが 1 本抜けたまま連結すると、それ以降の時刻が抜けた分
+    （1 本 約 7.4 分）だけ前へずれる（auto0048 で実際に起きた）。抜けを見つけたら、
+    ヘッダ時刻が分かっている直近のパートからの差で次のパートの開始を置き直す。
+    ヘッダの壁時計は最大 5 秒遅れるので、その分は誤差として残る。
+    `missing` にリストを渡すと、抜けたパート番号を入れて返す。"""
     out, base_epoch, off = [], None, 0.0
+    prev_no, ref = None, None           # ref: (ヘッダ時刻, そのパートの開始 off)
     for i, path in enumerate(sorted(paths)):
         rows = list(records(path))
+        m = re.search(r"_(\d+)\.bin$", path)
+        no = int(m.group(1)) if m else None
+        hdr = rows[0][1] if rows else 0
+        if no is not None and prev_no is not None and no > prev_no + 1:
+            if missing is not None:
+                missing.extend(range(prev_no + 1, no))
+            if ref and hdr >= 1700000000:
+                off = max(off, ref[1] + (hdr - ref[0]) * 1000)
+        if no is not None:
+            prev_no = no
         if not rows:
             continue
-        hdr = rows[0][1]
+        if hdr >= 1700000000:
+            ref = (hdr, off)
         if i == 0 and hdr >= 1700000000:
             base_epoch = hdr            # 先頭パートのヘッダが使えるならそれ
         last = 0
@@ -102,7 +121,11 @@ def main() -> int:
     ap.add_argument("--gps", help="スマホの測位 CSV（絶対時刻で突合して地図を出す）")
     a = ap.parse_args()
 
-    recs, base = merge_parts(a.logs)
+    missing = []
+    recs, base = merge_parts(a.logs, missing)
+    if missing:
+        print(f"★ パート {', '.join(f'{n:02d}' for n in missing)} が無い。その区間は欠測。"
+              "後ろの時刻はヘッダで置き直した（±5 秒）", file=sys.stderr)
     if not recs:
         raise SystemExit("レコードが無い")
     if base is None:

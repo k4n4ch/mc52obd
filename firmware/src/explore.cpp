@@ -326,6 +326,7 @@ static const uint32_t REINIT_GAP = 10000;   // 打ち直しの最短間隔
 static int pollMiss = 0;
 static uint32_t lastReinit = 0;
 static void cmdPropInit();
+static void fuelFeed(const uint8_t *r, int n);
 
 static void pollTick() {
   if (!pollN || millis() - pollLast < pollMs) return;
@@ -339,7 +340,10 @@ static void pollTick() {
      * 1 バイトの `FF` が返ると `n = 1` になり、これを数えていたので無応答カウンタが
      * 毎回リセットされ、ECU が寝たまま 84 秒 `w` を打ち直さなかった（auto0013）。
      * 断片は xfer がログに残すので、診断の手掛かりは失わない。 */
-    if (n >= 3 && r[1] == n && csOk2c(r, n)) gotAny = true;
+    if (n >= 3 && r[1] == n && csOk2c(r, n)) {
+      gotAny = true;
+      if (pollTbl[i] == 0x11) fuelFeed(r, n);
+    }
     int p = snprintf(line, sizeof line, "P %lu %02X",
                      (unsigned long)(millis() - pollT0), pollTbl[i]);
     if (n <= 0) p += snprintf(line + p, sizeof line - p, " -");
@@ -497,6 +501,149 @@ static void cmdObd() {
  * 死ぬので、有線の経路を潰してはいけない。 */
 static Preferences prefs;
 static bool otaOn = false;
+
+/* ══════════════════════════════════════════════════════════
+ * 燃料の積算（残燃料・直近燃費・走行可能距離の元）
+ *
+ * **基板で積算する。** 基板はキーを回せば必ず動くので、スマホを繋いでいない走行も
+ * 漏れない。ページは `F` 行を表示するだけで、満タンを知らせる（`fuel full`）。
+ *
+ *   燃料[µL] = nQ[cc/min] / 60 × (パルス[ms] − 無効噴射[ms]) × サイクル数
+ *   パルス = 0x11 [18-19] / 256 ms、1 サイクル（720°）1 噴射、サイクル数 = rpm / 120 × 秒
+ *
+ * 係数の既定値は 2026-10-03 の給油 2 区間（6.73 L / 8.69 L）の連立。較正し直しても
+ * 焼き直さずに済むよう NVS で上書きできる（`fuel cal`）。キーが無ければ既定値。
+ *
+ * **満タンを知る手段は人の操作だけ**（残量センサーはメーターに直結で ECU に無い）。
+ * 一度も `fuel full` していなければ残量は不明として出す。
+ *
+ * NVS への書き込みは消費が 20 mL 進むごと（10 L で約 500 回）と、エンジンが止まったとき。
+ * キーオフは電源ごと落ちるので、失うのは最大 20 mL。
+ * ══════════════════════════════════════════════════════════ */
+static const float FUEL_NQ_DEF = 284.9f, FUEL_DEAD_DEF = 0.778f, FUEL_CAP_DEF = 10.0f;
+static const uint32_t FUEL_SAVE_UL = 20000;        // 20 mL ごとに保存
+static const int FUEL_SLOTS = 20;                  // 直近燃費の窓 = 20 × 500 m = 10 km
+static const float FUEL_SLOT_M = 500.0f;
+/* 車速バイト [17] → 実速度。FINDINGS: [17] = 0.9332 × GPS − 0.216（15T、2026-09-24） */
+static const float SPD_A = 0.9332f, SPD_B = 0.216f;
+
+struct FuelSlot { uint32_t ul; uint16_t m; };
+static float fuelNq = FUEL_NQ_DEF, fuelDead = FUEL_DEAD_DEF, fuelCap = FUEL_CAP_DEF;
+static bool fuelKnown = false;             // 満タンを一度でも知らされたか
+static double fuelUl = 0;                  // 満タンからの消費 µL
+static uint32_t fuelSavedUl = 0;
+static FuelSlot fuelRing[FUEL_SLOTS];
+static int fuelRi = 0;                     // 次に書く区画
+static double slotUl = 0, slotM = 0;       // 書きかけの区画
+static uint32_t fuelLastMs = 0;
+static bool fuelRunning = false;
+static bool fuelLoaded = false;
+
+static void fuelLoad() {
+  prefs.begin("mc52", true);
+  fuelNq   = prefs.getFloat("fu_nq", FUEL_NQ_DEF);
+  fuelDead = prefs.getFloat("fu_dd", FUEL_DEAD_DEF);
+  fuelCap  = prefs.getFloat("fu_cap", FUEL_CAP_DEF);
+  fuelKnown = prefs.isKey("fu_ul");
+  fuelUl = prefs.getUInt("fu_ul", 0);
+  memset(fuelRing, 0, sizeof fuelRing);
+  if (prefs.getBytesLength("fu_rg") == sizeof fuelRing) prefs.getBytes("fu_rg", fuelRing, sizeof fuelRing);
+  fuelRi = prefs.getInt("fu_ri", 0) % FUEL_SLOTS;
+  prefs.end();
+  fuelSavedUl = (uint32_t)fuelUl;
+  fuelLoaded = true;
+}
+static void fuelSave(bool ring) {
+  prefs.begin("mc52", false);
+  if (fuelKnown) prefs.putUInt("fu_ul", (uint32_t)fuelUl);
+  if (ring) { prefs.putBytes("fu_rg", fuelRing, sizeof fuelRing); prefs.putInt("fu_ri", fuelRi); }
+  prefs.end();
+  fuelSavedUl = (uint32_t)fuelUl;
+}
+
+static void fuelFeed(const uint8_t *r, int n) {
+  if (n < 25) return;
+  if (!fuelLoaded) fuelLoad();
+  uint32_t now = millis();
+  float dt = fuelLastMs ? (now - fuelLastMs) / 1000.0f : 0;
+  fuelLastMs = now;
+  if (dt > 1.0f) dt = pollMs / 1000.0f;    // 欠測は 1 周期ぶんで打ち切る（解析側と同じ扱い）
+  uint16_t rpm = (r[4] << 8) | r[5];
+  uint16_t inj = (r[18] << 8) | r[19];
+  uint8_t spd = r[17];
+
+  bool running = rpm > 0;
+  if (fuelRunning && !running && fuelKnown) fuelSave(false);   // 止まったら書いておく
+  fuelRunning = running;
+
+  float ul = 0;
+  float pulse = inj / 256.0f;
+  if (running && inj > 0 && pulse > fuelDead)
+    ul = fuelNq / 60.0f * (pulse - fuelDead) * rpm / 120.0f * dt;   // cc/min÷60 = µL/ms
+  float m = spd ? (spd + SPD_B) / SPD_A / 3.6f * dt : 0;
+  fuelUl += ul;
+  slotUl += ul; slotM += m;
+  if (slotM >= FUEL_SLOT_M) {
+    fuelRing[fuelRi] = { (uint32_t)slotUl, (uint16_t)slotM };
+    fuelRi = (fuelRi + 1) % FUEL_SLOTS;
+    slotUl = slotM = 0;
+    fuelSave(true);
+  } else if (fuelKnown && fuelUl - fuelSavedUl >= FUEL_SAVE_UL) {
+    fuelSave(false);
+  }
+}
+
+/* `F <消費mL|-> <容量mL> <直近mL> <直近m>` —— 機械可読。消費が - は満タン未設定。
+ * 直近は窓の全区画＋書きかけ。ページが残量・燃費・可能距離を出す。 */
+static void fuelLine() {
+  if (!fuelLoaded) fuelLoad();
+  double rul = slotUl, rm = slotM;
+  for (int i = 0; i < FUEL_SLOTS; i++) { rul += fuelRing[i].ul; rm += fuelRing[i].m; }
+  char b[96];
+  if (fuelKnown) snprintf(b, sizeof b, "F %.0f %.0f %.0f %.0f\n", fuelUl / 1000, fuelCap * 1000, rul / 1000, rm);
+  else           snprintf(b, sizeof b, "F - %.0f %.0f %.0f\n", fuelCap * 1000, rul / 1000, rm);
+  out(b);
+}
+static void fuelTick() {
+  static uint32_t last = 0;
+  if (!bleConn || millis() - last < 1000) return;
+  last = millis();
+  fuelLine();
+}
+
+static void cmdFuel(const char *arg) {
+  if (!fuelLoaded) fuelLoad();
+  if (!strcmp(arg, "full")) {
+    /* **ログにも残す。** 給油点が記録に入っていれば、後から給油区間の回帰ができる */
+    char m[64];
+    int k = snprintf(m, sizeof m, "fuel full used_ml=%.0f", fuelKnown ? fuelUl / 1000 : -1.0);
+    logRec(T_NOTE, (const uint8_t *)m, k);
+    fuelUl = 0; fuelKnown = true;
+    fuelSave(false);
+    out("満タンにした（消費を 0 に戻した）\n");
+  } else if (!strncmp(arg, "cal", 3)) {
+    float nq = 0, dd = -1;
+    if (sscanf(arg + 3, "%f %f", &nq, &dd) == 2 && nq > 50 && nq < 1000 && dd >= 0 && dd < 3) {
+      fuelNq = nq; fuelDead = dd;
+      prefs.begin("mc52", false); prefs.putFloat("fu_nq", nq); prefs.putFloat("fu_dd", dd); prefs.end();
+      outf("係数を nQ %.1f cc/min・無効噴射 %.3f ms にした\n", nq, dd);
+    } else out("fuel cal <nQ cc/min> <無効噴射 ms>   例: fuel cal 284.9 0.778\n");
+  } else if (!strncmp(arg, "cap", 3)) {
+    float c = atof(arg + 3);
+    if (c > 1 && c < 50) {
+      fuelCap = c; prefs.begin("mc52", false); prefs.putFloat("fu_cap", c); prefs.end();
+      outf("容量を %.2f L にした\n", c);
+    } else out("fuel cap <L>\n");
+  } else if (*arg) {
+    out("fuel / fuel full / fuel cal <nQ> <無効噴射> / fuel cap <L>\n");
+    return;
+  } else {
+    outf("係数 nQ %.1f cc/min・無効噴射 %.3f ms・容量 %.2f L\n", fuelNq, fuelDead, fuelCap);
+    if (fuelKnown) outf("満タンから %.2f L 消費、残 %.2f L\n", fuelUl / 1e6, fuelCap - fuelUl / 1e6);
+    else out("満タン未設定（fuel full で始まる）\n");
+  }
+  fuelLine();
+}
 static WiFiMulti wifiMulti;
 
 /* **複数の AP を登録できる。** 家では自宅の WiFi、バイクの横ではスマホの
@@ -971,6 +1118,10 @@ static void help() {
       "  wifi <ssid> <pass>  NVS に保存（最大 4 件。ソースには書かない）\n"
       "                      家の WiFi とスマホのテザリングを両方入れておける\n"
       "  ota on | off        OTA を有効化して IP を返す（既定は切。再起動で戻る）\n"
+      "[燃料] 0x11 の噴射を積算（poll に 11 が要る）。NVS に残る\n"
+      "  fuel                係数と残量。F 行（消費 容量 直近mL 直近m）も出す\n"
+      "  fuel full           満タンにした（消費を 0 に）。ログにも印を残す\n"
+      "  fuel cal <nQ> <ms>  係数を変える   fuel cap <L>  容量を変える\n"
       "[その他]\n"
       "  time <unix> 壁時計を合わせる（GPS ログとの突き合わせに要る）\n"
       "  sess        セッション連番と開始時刻の台帳（auto は名前に日時が入らないため）\n"
@@ -1203,6 +1354,7 @@ static void runCmd(char *line) {
     return;
   }
   if (!strcmp(line, "sess")) { cmdSess(); return; }
+  if (!strcmp(line, "fuel")) { cmdFuel(arg); return; }
   if (!strcmp(line, "x") || !strcmp(line, "X")) {
     uint8_t b[64];
     int n = hexBytes(arg, b, sizeof b - 1);
@@ -1306,6 +1458,7 @@ void loop() {
   logTick();
   getTick();      // 非ブロッキング転送。記録と表示を止めない
   pollTick();
+  fuelTick();
   keepAlive();
   while (Serial.available()) {
     char ch = Serial.read();

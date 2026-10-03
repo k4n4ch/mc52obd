@@ -85,7 +85,7 @@ body{
 #alert b{color:#fff}
 
 /* ── 計器 ───────────────────────────────────── */
-#gauges{flex:1 1 auto; display:grid; grid-template-rows:1fr 1fr 1fr auto;
+#gauges{flex:1 1 auto; display:grid; grid-template-rows:1fr 1fr 1fr auto auto;
   gap:.4rem; padding:.4rem; min-height:0}
 .row{background:var(--panel); border:1px solid var(--line); border-radius:.5rem;
   position:relative; display:flex; align-items:center; justify-content:center;
@@ -98,6 +98,7 @@ body{
 #rpmfill{height:100%; width:0%; transition:width .1s linear;
   background:linear-gradient(90deg,#2a6fb8,#4da3ff 60%,#ffb020 82%,#ff4d5e 95%)}
 #secondary{flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem}
+#fuel{flex:0 0 auto; display:grid; grid-template-columns:repeat(3,1fr); gap:.4rem}
 .cell{background:var(--panel); border:1px solid var(--line); border-radius:.4rem;
   padding:.32rem .2rem; text-align:center}
 .cell .lbl{font-size:.6rem; color:var(--dim); letter-spacing:.1em}
@@ -143,8 +144,8 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 /* 横向きは縦が足りない。3 段を横 3 列に組み替える（index.html と同じ） */
 @media(orientation:landscape) and (max-height:560px){
-  #gauges{grid-template-rows:1fr auto; grid-template-columns:repeat(3,1fr)}
-  #secondary{grid-column:1 / -1}
+  #gauges{grid-template-rows:1fr auto auto; grid-template-columns:repeat(3,1fr)}
+  #secondary,#fuel{grid-column:1 / -1}
   .val{font-size:min(13vw,26vh)}
 }
 </style>
@@ -192,6 +193,12 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
     <div class="cell" id="ectc"><div class="lbl">ECT °C</div><div class="val stale" id="ectv">--</div></div>
     <div class="cell" id="voltc"><div class="lbl">VOLT</div><div class="val stale" id="voltv">--</div></div>
   </div>
+
+  <div id="fuel">
+    <div class="cell" id="fremc"><div class="lbl">残 L</div><div class="val stale" id="fremv">--</div></div>
+    <div class="cell"><div class="lbl">直近 km/L</div><div class="val stale" id="fkmlv">--</div></div>
+    <div class="cell"><div class="lbl">可能 km</div><div class="val stale" id="frngv">--</div></div>
+  </div>
 </div>
 
 <div id="bar">
@@ -215,6 +222,12 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
     <button id="bRmGot" disabled>回収済みを消す</button>
     <button id="bRmAll" disabled>全部消す</button>
   </div>
+
+  <h2>燃料</h2>
+  <div class="sub3">
+    <button id="bFull" disabled>満タンにした</button>
+  </div>
+  <div class="note" id="fuelInfo">満タンにしたら押す。基板が消費を 0 から積算し直す（記録にも給油の印が残る）</div>
 
   <h2>前スプロケ</h2>
   <label>丁数 <select id="sfront"></select></label>
@@ -293,7 +306,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20261003a';
+const VERSION = 'v20261003b';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -345,6 +358,7 @@ async function connect() {
       $('bConn').classList.remove('active');
       $('bRec').disabled = $('bSnap').disabled = $('bXfer').disabled = true;
       $('bLs').disabled = $('bRmGot').disabled = $('bRmAll').disabled = true;
+      $('bFull').disabled = true;
       say('\n[BLE 切断。基板の記録は続いている]\n');
     });
     resetMon();
@@ -359,6 +373,7 @@ async function connect() {
     $('bRec').disabled = $('bSnap').disabled = false;
     $('bLs').disabled = $('bXfer').disabled = false;
     $('bRmGot').disabled = $('bRmAll').disabled = false;
+    $('bFull').disabled = false;
     // **接続したら壁時計を入れる。** 基板に RTC が無いので、これをやらないと
     // 記録した時刻を測位ログと突き合わせられない
     // **ミリ秒まで、送る瞬間の時刻を送る。** 基板は受け取ってから実行するまでの待ちを足す
@@ -394,10 +409,12 @@ function feed(v) {
     const line = rxBuf.slice(0, i).replace(/\r$/, '');
     rxBuf = rxBuf.slice(i + 1);
     if (line.startsWith('P ')) onFrame(line);
+    else if (line.startsWith('F ')) onFuel(line);
     else if (xferLine(line)) { renderFiles(); }
     else if (lsLine(line) || sessLine(line) || lsEnd(line)) { /* 一覧は表示側で持つ */ }
     else if (line.trim()) {
       say(line + '\n');
+      if (/^満タンにした/.test(line)) $('bFull').classList.remove('active');
       // 記録中のファイルは転送してはいけない（追記中のものを吸うと壊れる）
       const m = line.match(/^記録中 \/?(\S+\.bin)/);
       if (m) {
@@ -564,7 +581,9 @@ function resetMon() {
          inj: null, thr: null, volt: null, at: 0};
   lastGear = null;
   monAt = 0;
+  fuel = null;
   renderMon();
+  renderFuel();
 }
 
 function onMonFrame(tt, by) {
@@ -623,6 +642,34 @@ function renderMon() {
   $('ectc').className = 'cell' + (mon.ect > 105 ? ' bad' : mon.ect > 98 ? ' warn' : '');
   $('voltc').className = 'cell' + (mon.volt !== null && (mon.volt < 12.0 || mon.volt > 15.0)
       ? ' bad' : mon.volt !== null && mon.volt < 12.8 ? ' warn' : '');
+  renderFuel();                // F 行が途絶えたら薄くするため、フレームごとにも描く
+}
+
+/* ══════════════════════════════════════════════════════════
+ * 燃料（基板が積算した値を出すだけ）
+ *
+ * `F <消費mL|-> <容量mL> <直近mL> <直近m>` を 1 秒ごとに受ける。消費が `-` は満タン未設定。
+ * **走行可能距離は直近燃費で割る。** 高速は燃費が落ちるので、高速を降りるかどうかの
+ * 判断には「今の走り方で何 km もつか」が要る。窓は基板側で直近 10 km。
+ * 直近の距離が短いうち（2 km 未満）は燃費を出さない。
+ * ══════════════════════════════════════════════════════════ */
+const FUEL_MIN_M = 2000;
+let fuel = null;
+function onFuel(line) {
+  const f = line.split(' ');
+  if (f.length < 5) return;
+  fuel = { used: f[1] === '-' ? null : +f[1], cap: +f[2], rml: +f[3], rm: +f[4], at: Date.now() };
+  renderFuel();
+}
+function renderFuel() {
+  const st = !fuel || Date.now() - fuel.at > 3000;
+  const rem = fuel && fuel.used !== null ? (fuel.cap - fuel.used) / 1000 : null;
+  const kml = fuel && fuel.rm >= FUEL_MIN_M && fuel.rml > 0 ? fuel.rm / fuel.rml : null;  // m/mL = km/L
+  setv('fremv', rem === null ? '--' : Math.max(0, rem).toFixed(1), st);
+  setv('fkmlv', kml === null ? '--' : kml.toFixed(1), st);
+  setv('frngv', rem === null || kml === null ? '--' : Math.max(0, Math.round(rem * kml)), st);
+  // 取扱説明書：残量警告灯は有効残量 1.9 L で点灯
+  $('fremc').className = 'cell' + (rem !== null && rem <= 1.9 ? ' bad' : rem !== null && rem <= 3 ? ' warn' : '');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1147,6 +1194,9 @@ $('bLog').onclick = () => {
 };
 $('bExport').onclick = () => exportPts(pts);
 $('bSnap').onclick = () => send('snap');
+$('bFull').onclick = () => ask('満タンにした',
+    '基板の燃料消費を 0 に戻す。給油口の仕切りの上まで入れたときに押す。',
+    [['やめる', () => {}], ['満タン', () => { $('bFull').classList.add('active'); send('fuel full'); }]]);
 $('bLs').onclick = async () => { queue = []; seen = {}; lsFresh = false; await send('rec'); await send('ls'); };
 $('cmd').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
