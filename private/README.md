@@ -7,7 +7,8 @@
 
 ```
 private/
-  logs/     走行ログ（OBD の CSV と GPS の GPX）
+  logs/     走行ログ（Track A の CSV と GPX、Track B の .bin、測位 gps_*）
+  csv/      Track B の .bin から作った CSV（auto*.csv。.bin から再生成できる）
 ```
 
 走行ログ以外の private なデータ（スマホアプリのエクスポート、写真の位置情報付き原本など）が
@@ -34,6 +35,10 @@ python3 tools/importlogs.py            # 取り込む（元は残す）
 python3 tools/importlogs.py --move     # 一致を確認してから元を消す
 python3 tools/importlogs.py --list     # ここの中身を一覧する
 ```
+
+**Track B は `rec.html` の「まとめて書き出す」で zip 1 個（`mc52_<日付>_<時刻>.zip`）になる。**
+`importlogs.py` が開いて `.bin`・`gps_*` を `logs/`、`auto*.csv` を `csv/` へ振り分け、
+`auto` のパートに欠番があれば知らせる。
 
 **同名で中身が違うファイルは上書きしない。** 走行ログは撮り直せないので、衝突は報告だけ
 して手を止める。

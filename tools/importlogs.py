@@ -16,17 +16,25 @@
 `*_bk*.csv` はアプリが途中経過を書き出していた頃の名残で、全尺の先頭部分と
 一致する。全尺があるものは冗長なので取り込まない（`--include-bk` で変わる）。
 現在のアプリは IndexedDB に下書きを持つのでこの名前では出てこない。
+
+**Track B（基板）の `rec.html` は zip 1 個で書き出す**（`mc52_<日付>_<時刻>.zip`）。
+中身を振り分ける: `.bin` と測位（`gps_*`）は `private/logs/`、基板ログの CSV（`auto*.csv`）は
+`private/csv/`。ばらで落ちてきたもの（古い版のページ）も同じ規則で拾う。
+取り込んだ後、`auto` のパートに欠番があれば知らせる（基板にまだ残っていれば `get` で取れる）。
 """
 
 import argparse
 import csv
 import hashlib
 import pathlib
+import re
 import shutil
 import sys
+import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 DEST = REPO / 'private' / 'logs'
+DEST_CSV = REPO / 'private' / 'csv'
 # 車両ログのファイル名。`mc52_` が現行、`cb250r_` は 2026-08 中頃までの旧名
 PATTERNS = ('mc52_*.csv', 'cb250r_*.csv')
 
@@ -89,6 +97,71 @@ def do_list():
     return 0
 
 
+def route(name):
+    """Track B のファイル名 → 置き場。対象外は None"""
+    if re.fullmatch(r'auto\d{4}(_\d+)?\.bin', name) or re.fullmatch(r'gps_[\dT-]+(_\w+)?\.(csv|gpx)', name):
+        return DEST
+    if re.fullmatch(r'auto\d{4}[a-z]?\.csv', name):
+        return DEST_CSV
+    return None
+
+
+def put(name, data, added, same, conflict):
+    """1 ファイルを置く。**同名で中身が違えば置かない**（走行ログは撮り直せない）"""
+    d = route(name) / name
+    if not d.exists():
+        d.write_bytes(data)
+        added.append(d)
+        return True
+    if hashlib.md5(data).hexdigest() == digest(d):
+        same.append(d)
+        return True
+    conflict.append(d)
+    return False
+
+
+def track_b(src, move):
+    """zip と、ばらの Track B ファイルを取り込む。戻り値は衝突の数"""
+    DEST_CSV.mkdir(parents=True, exist_ok=True)
+    added, same, conflict, done = [], [], [], []
+    for z in sorted(src.glob('mc52_*.zip')):
+        ok = True
+        with zipfile.ZipFile(z) as zf:
+            for i in zf.infolist():
+                if route(i.filename) is None:
+                    print(f'  ? 振り分け先が無い {z.name}:{i.filename}（取り込まない）')
+                    ok = False
+                    continue
+                ok &= put(i.filename, zf.read(i), added, same, conflict)
+        print(f'  zip  {z.name}  {len(zf.infolist())} 件')
+        if ok:
+            done.append(z)
+    for f in sorted(p for p in src.iterdir() if p.is_file() and route(p.name)):
+        if put(f.name, f.read_bytes(), added, same, conflict):
+            done.append(f)
+    for p in added:
+        print(f'  取込  {p.relative_to(REPO)}')
+    for p in conflict:
+        print(f'  ★衝突 {p.name}  同名で中身が違う。手で確認すること')
+    if same:
+        print(f'  既存  {len(same)} 件（中身一致）')
+    if move:
+        for f in done:
+            f.unlink()
+        print(f'  {src} から {len(done)} 個を削除した（取り込み先と一致を確認済み）')
+    # 欠番。取り込んだ走行だけ見る
+    seqs = {m.group(1) for p in added if (m := re.fullmatch(r'auto(\d{4})_\d+\.bin', p.name))}
+    for sq in sorted(seqs):
+        nos = sorted(int(re.search(r'_(\d+)\.bin$', p.name).group(1)) for p in DEST.glob(f'auto{sq}_*.bin'))
+        miss = sorted(set(range(1, nos[-1] + 1)) - set(nos))
+        if miss:
+            print(f'  ★欠番 auto{sq}: パート {", ".join(f"{n:02d}" for n in miss)} が無い。'
+                  f'基板に残っていれば get auto{sq}_NN.bin')
+    if added or conflict:
+        print(f'  Track B: 新規 {len(added)} / 既存 {len(same)} / 衝突 {len(conflict)}')
+    return len(conflict)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--from', dest='src', default='~/Downloads', help='取り込み元')
@@ -106,10 +179,12 @@ def main():
         print(f'[!] 取り込み元が無い: {src}', file=sys.stderr)
         return 1
 
+    nb = track_b(src, args.move)
     found = sorted({p for pat in PATTERNS for p in src.glob(pat)})
     if not found:
-        print(f'{src} に走行ログは無い')
-        return 0
+        if not nb:
+            print(f'{src} に Track A の走行ログは無い')
+        return 1 if nb else 0
 
     added, same, skipped, conflict = [], [], [], []
     for p in found:
@@ -153,7 +228,7 @@ def main():
         print(f'\n{src} から {gone} 個を削除した（コピー先と一致を確認済み）')
 
     print(f'\n新規 {len(added)} / 既存 {len(same)} / 除外 {len(skipped)} / 衝突 {len(conflict)}')
-    return 1 if conflict else 0
+    return 1 if conflict or nb else 0
 
 
 if __name__ == '__main__':

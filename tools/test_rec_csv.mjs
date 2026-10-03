@@ -15,17 +15,22 @@
  *   5. 基板が先に消したパートがある走行は、手元の分だけで作る
  *   6. 記録中の走行には手を出さない
  *   7. ページを開き直しても、前に貯めた測位で位置を付ける（auto0024 で位置が抜けた件）
+ *   8. 回収した .bin・CSV・測位は端末に落とさず積み、「まとめて書き出す」で zip 1 個にする。
+ *      「前回をやり直す」で同じ中身をもう一度出せる
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import {spawn} from 'node:child_process';
+import {spawn, execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const KLCSV = createRequire(import.meta.url)(path.join(ROOT, 'klcsv.js'));
 const LOGS = path.join(ROOT, 'private', 'logs');
 const PROF = path.join(ROOT, '..', 'work', '.intermediate', 'chrome-rec-test');
+const TMP_ZIP = path.join(ROOT, '..', 'work', '.intermediate', 'rec-zip-test');
+fs.mkdirSync(TMP_ZIP, {recursive: true});
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const HTTP = 8765, CDP = 9223;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -183,6 +188,44 @@ try {
   const want24 = KLCSV.build(p24.map(n => ({name: n, u8: u8(n)})), gAm);
   const nPos = d24 ? d24.text.trim().split('\n').slice(1).filter(l => l.split(',')[15] !== '').length : 0;
   ok(d24 && nPos === want24.matched, `朝の位置が付いた（${nPos} 行、期待 ${want24.matched} 行）`);
+
+  // ── 8: まとめて書き出す ─────────────────────────────────
+  console.log('書き出し（auto0016 の 3 パート＋CSV＋測位を zip 1 個に）');
+  await cdp('Page.navigate', {url: `http://127.0.0.1:${HTTP}/rec.html`});
+  await sleep(1500);
+  for (let i = 0; i < 50 && !(await ev('typeof exportOut === "function"').catch(() => false)); i++) await sleep(200);
+  // dl / dlBin は本物のまま。端末へのダウンロード（dlNow）だけ横取りする
+  await ev(`window.__zip = []; dlNow = (name, data) => __zip.push({name, data});
+    baseDone = true; idb('out', 'readwrite', s => s.clear()).then(() => 1)`);
+  const p16b = partsOf('auto0016');
+  await ls(p16b);
+  for (const n of p16b) await transfer(n);
+  await ev(`maybeCsv('auto0016', true).then(() => 1)`);
+  await setGps(gPm);
+  await ev(`exportPts(pts); 1`);
+  await sleep(800);
+  const pend8 = await ev(`outItems().then(a => a.filter(x => !x.batch).map(x => x.name).sort())`);
+  ok(pend8.length === 6 && p16b.every(n => pend8.includes(n)) && pend8.includes('auto0016.csv'),
+     `端末に落とさず積んだ（${pend8.join(' ')}）`);
+  ok(await ev('__zip.length') === 0, 'この時点ではダウンロードしていない');
+  await ev(`exportOut(false).then(() => 1)`);
+  const z1 = await ev(`(async () => { const z = __zip[0]; if (!z) return null;
+    const b = new Uint8Array(await z.data.arrayBuffer()); let s = '';
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+    return {name: z.name, b64: btoa(s)}; })()`);
+  ok(await ev('__zip.length') === 1 && /^mc52_\d{8}_\d{6}\.zip$/.test(z1 && z1.name), `zip 1 個（${z1 && z1.name}）`);
+  const zf = path.join(TMP_ZIP, 'out.zip');
+  fs.writeFileSync(zf, Buffer.from(z1.b64, 'base64'));
+  const names = execFileSync('python3', ['-c', `import zipfile,sys,hashlib
+z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None
+print(' '.join(sorted(i.filename for i in z.infolist())))
+print(hashlib.md5(z.read(sys.argv[2])).hexdigest())`, zf, p16b[0]], {encoding: 'utf8'}).trim().split('\n');
+  const md5 = createHash('md5').update(fs.readFileSync(path.join(LOGS, p16b[0]))).digest('hex');
+  ok(names[0] === pend8.join(' ') && names[1] === md5, 'zip の中身が積んだものと一致し、.bin はバイト一致');
+  ok(await ev(`outItems().then(a => a.filter(x => !x.batch).length)`) === 0 && await ev(`$('bOut').disabled`),
+     '書き出したものは「済み」になる');
+  await ev(`exportOut(true).then(() => 1)`);
+  ok(await ev('__zip.length') === 2 && await ev('__zip[1].name') === z1.name, '前回をやり直すと同じ名前で出る');
 } catch (e) {
   fail++; console.log('  ✗ 例外: ' + e.message);
 } finally {
