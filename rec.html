@@ -293,7 +293,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20260925d';
+const VERSION = 'v20261003a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -347,6 +347,7 @@ async function connect() {
       $('bLs').disabled = $('bRmGot').disabled = $('bRmAll').disabled = true;
       say('\n[BLE 切断。基板の記録は続いている]\n');
     });
+    resetMon();
     const srv = await (await dev.gatt.connect()).getPrimaryService(SVC);
     rxChar = await srv.getCharacteristic(RX);
     txChar = await srv.getCharacteristic(TX);
@@ -555,6 +556,16 @@ function gearFrom(rpm, raw, drive) {
 const DRIVE_TXT = {0x00: '駆動', 0x01: 'N / クラッチ', 0x03: 'スタンド'};
 let mon = {rpm: null, spd: null, ect: null, gear: null, drive: null,
            inj: null, thr: null, volt: null, at: 0};
+
+/* **接続し直したら表示を空に戻す。** 残すと、前回の走行の最後の値が今の値のように
+ * 見える（薄くはなるが、前回の値だとは画面から分からない）。 */
+function resetMon() {
+  mon = {rpm: null, spd: null, ect: null, gear: null, drive: null,
+         inj: null, thr: null, volt: null, at: 0};
+  lastGear = null;
+  monAt = 0;
+  renderMon();
+}
 
 function onMonFrame(tt, by) {
   const b = by.map(h => parseInt(h, 16));
