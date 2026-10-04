@@ -285,7 +285,7 @@ button:disabled{opacity:.35}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
-const VERSION = 'v20260925b';
+const VERSION = 'v20261004a';
 
 /* ══════════════════════════════════════════════════════════
  * MC52 走行ログビュワー
@@ -534,7 +534,7 @@ function mergeSessions(sets) {
     for (const r of s.rows) { r.t = (r.ms - origin) / 1000; r.sess = i; }
     // 各セッションの先頭に印を付ける。チャートの区切りに使う
     s.rows[0].sessTop = true;
-    out.push(...s.rows);
+    for (const r of s.rows) out.push(r);   // push(...rows) は約 12 万行で引数の上限を超える
   });
   out.sort((a, b) => a.t - b.t);
   out.sessions = named.map(s => s.src);
@@ -1358,8 +1358,15 @@ function buildChartBg(s, w, h, dpr) {
   const vals = rows.map(r => r[s.key]);
   const ok = vals.filter(v => v != null);
   if (!ok.length) return;
-  let lo = s.min !== undefined ? s.min : Math.min(...ok);
-  let hi = s.max !== undefined ? s.max : Math.max(...ok);
+  /* **展開して渡さない。** Math.min(...ok) は引数の上限（約 12 万）を超えると落ちる。
+   * 10/03 の 17 本（13.9 万行）を繋いで「Maximum call stack size exceeded」で読めなかった */
+  let lo = s.min, hi = s.max;
+  if (lo === undefined || hi === undefined) {
+    let a = Infinity, b = -Infinity;
+    for (const v of ok) { if (v < a) a = v; if (v > b) b = v; }
+    if (lo === undefined) lo = a;
+    if (hi === undefined) hi = b;
+  }
   if (hi === lo) { hi = lo + 1; }
   // 範囲を明示した系列（ギヤ）は余白を足さない。目盛りが実在しない値になるため
   const fixed = s.min !== undefined && s.max !== undefined;
