@@ -220,6 +220,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
   <div class="sub3">
     <button id="bOut" disabled>まとめて書き出す（0）</button>
     <button id="bOutAgain" disabled>前回をやり直す</button>
+    <button id="bGpsArch">測位の控え（7 日）</button>
   </div>
   <div class="note">回収したログ・CSV・測位を zip 1 個で落とす。Mac へ送る前に押す</div>
 
@@ -313,7 +314,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20261003c';
+const VERSION = 'v20261004a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -1293,6 +1294,18 @@ $('bLog').onclick = () => {
 $('bExport').onclick = () => exportPts(pts);
 $('bOut').onclick = () => exportOut(false);
 $('bOutAgain').onclick = () => exportOut(true);
+/* **測位の控えを丸ごと書き出し待ちへ。** CSV 用に IndexedDB へ 7 日ぶん貯めている測位は、
+ * これまで書き出す手段が無かった。走行の CSV がスマホで作られなかったとき（パートが
+ * 抜けた auto0048）、Mac で .bin から作り直すと位置が付かない。これを klcsv.py --gps に渡す。 */
+$('bGpsArch').onclick = async () => {
+  await archiveGps();
+  let arch = [];
+  try { arch = await idb('gps', 'readonly', s => s.getAll()); } catch (e) {}
+  if (!arch.length) { say('[測位の控えが無い]\n'); return; }
+  arch.sort((a, b) => a.t - b.t);
+  say(`[測位の控え ${arch.length} 点 ${new Date(arch[0].t).toLocaleString()} 〜 ${new Date(arch[arch.length - 1].t).toLocaleString()}]\n`);
+  exportPts(arch);
+};
 refreshOut();
 $('bSnap').onclick = () => send('snap');
 $('bFull').onclick = () => ask('満タンにした',
