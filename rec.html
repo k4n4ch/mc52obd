@@ -314,7 +314,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20261014a';
+const VERSION = 'v20261014b';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -358,9 +358,12 @@ async function connect() {
      * 2026-10-14 に Pixel 2 台の候補から基板が消えた（Mac からは見える）。フィルタで
      * 弾かれているのか、広告を受け取れていないのかを分ける */
     const any = new URLSearchParams(location.search).has('any');
+    /* 普段は **UUID か名前のどちらかが合えば出す。** 10-14 に Android 2 台で UUID の照合だけが
+     * 外れ、全機器モードでは見えた（Mac では UUID が広告に載っている）。名前は OS がキャッシュ
+     * することがあるので UUID と併用する */
     dev = await navigator.bluetooth.requestDevice(any
       ? { acceptAllDevices: true, optionalServices: [SVC] }
-      : { filters: [{ services: [SVC] }] });
+      : { filters: [{ services: [SVC] }, { namePrefix: 'MC52' }], optionalServices: [SVC] });
     say(`[選んだ機器 ${dev.name || '(名前なし)'}  id ${dev.id}]\n`);
     dev.addEventListener('gattserverdisconnected', () => {
       /* **掴んだままの参照を捨てる。** 残しておくと `send()` が書き込みに行って
