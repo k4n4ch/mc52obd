@@ -314,7 +314,7 @@ code{font-family:ui-monospace,Menlo,monospace; color:var(--fg);
 
 <script src="klcsv.js"></script>
 <script>
-const VERSION = 'v20261004a';
+const VERSION = 'v20261014a';
 document.getElementById('ver').textContent = VERSION;
 
 const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -354,7 +354,14 @@ async function connect() {
   try {
     // **filters にサービス UUID を入れる。** optionalServices だけだと触れない。
     // 名前で探さないのは、OS 側が古い名前をキャッシュすることがあるため
-    dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    /* **`?any=1` で開くとフィルタを外し、周囲の全機器を候補に出す（診断用）。**
+     * 2026-10-14 に Pixel 2 台の候補から基板が消えた（Mac からは見える）。フィルタで
+     * 弾かれているのか、広告を受け取れていないのかを分ける */
+    const any = new URLSearchParams(location.search).has('any');
+    dev = await navigator.bluetooth.requestDevice(any
+      ? { acceptAllDevices: true, optionalServices: [SVC] }
+      : { filters: [{ services: [SVC] }] });
+    say(`[選んだ機器 ${dev.name || '(名前なし)'}  id ${dev.id}]\n`);
     dev.addEventListener('gattserverdisconnected', () => {
       /* **掴んだままの参照を捨てる。** 残しておくと `send()` が書き込みに行って
        * 例外になる。**測位は止めない** —— 基板を切っただけで走行の測位を捨てる
