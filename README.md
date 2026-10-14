@@ -2,11 +2,13 @@
 
 Honda MC52（CB250R 2018年式）の OBD 診断ポートから何が読めるかを探索する。
 
+リンクの `?v=` はページの版。**ブラウザのキャッシュを避けるため、ページを更新したらここも書き換える。**
+
 | | | 相手 |
 |---|---|---|
-| **走行中のモニタ** | <https://k4n4ch.github.io/mc52obd/> | ELM327 |
-| **基板のモニタと記録** | <https://k4n4ch.github.io/mc52obd/rec.html> | 自作基板（Track B） |
-| **ログビュワー** | <https://k4n4ch.github.io/mc52obd/map.html> | — |
+| **走行中のモニタ** | <https://k4n4ch.github.io/mc52obd/?v=v20260908b> | ELM327 |
+| **基板のモニタと記録** | <https://k4n4ch.github.io/mc52obd/rec.html?v=v20261014b> | 自作基板（Track B） |
+| **ログビュワー** | <https://k4n4ch.github.io/mc52obd/map.html?v=v20261004a> | — |
 
 モニタと記録ページは **Android Chrome + HTTPS** が要る（Web Bluetooth が iOS Safari
 非対応のため）。ビュワーは PC ブラウザでも動く。
@@ -100,7 +102,7 @@ ELM327 の **BLE** タイプを使う。BLE は Classic SPP と違い macOS で 
 
 ## 走行中モニタ（index.html）
 
-<https://k4n4ch.github.io/mc52obd/>
+<https://k4n4ch.github.io/mc52obd/?v=v20260908b>
 
 車載マウントで走行中に見る単一ファイルの Web アプリ。回転数・車速・スロットル・ギヤ段・
 水温・電圧を表示し、REC で CSV と GPX を書き出す。fl4obd と同じ構成だが、こちらは
@@ -116,7 +118,7 @@ ELM327 の **BLE** タイプを使う。BLE は Classic SPP と違い macOS で 
 
 ## ログビュワー（map.html）
 
-<https://k4n4ch.github.io/mc52obd/map.html>
+<https://k4n4ch.github.io/mc52obd/map.html?v=v20261004a>
 
 REC で書き出した CSV を読み込み、経路と時系列を見返す。PC ブラウザと Android Chrome の
 双方で動く。走行中に見る画面ではないので、こちらは情報密度を優先している。
